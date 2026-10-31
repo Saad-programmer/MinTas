@@ -1,0 +1,3427 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+Problematique_Exemple/
+  bench_students_map
+  bench_students_map.cpp
+  bench_students_raw
+  bench_students_raw.cpp
+  bench_students_vector
+  bench_students_vector.cpp
+bench_heap_list_scale
+bench_heap_list_scale.cpp
+bench_heap_map_scale
+bench_heap_map_scale.cpp
+bench_heap_raw_scale
+bench_heap_raw_scale.cpp
+bench_heap_vector_scale
+bench_heap_vector_scale.cpp
+bench_mintas
+bench_mintas_scale
+bench_mintas_scale.cpp
+bench_mintas.cpp
+heap_list
+heap_list.cpp
+heap_map
+heap_map.cpp
+heap_raw
+heap_raw.cpp
+heap_vector
+heap_vector.cpp
+minTas
+minTas.cpp
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="Problematique_Exemple/bench_students_map.cpp">
+// bench_students_map.cpp — MinHeapMap sur Student (boursiers)
+// Compilation : g++ -std=c++17 -O2 -Wall -Wextra -o bench_students_map bench_students_map.cpp
+// Exécution   : ./bench_students_map
+//
+// ATTENTION : MinHeapMap = O(log² N) par insert/pop. À N = 1e6, l'insert complet
+// prend plusieurs secondes, mais reste faisable (~5-15 s selon machine).
+
+#include <iostream>
+#include <map>
+#include <string>
+#include <vector>
+#include <random>
+#include <chrono>
+#include <iomanip>
+#include <algorithm>
+#include <cstdint>
+#include <stdexcept>
+
+// ============================================================
+static const std::size_t N         = 1'000'000;
+static const std::size_t DEL_COUNT = 5'000;      // deleteKey O(N) → cap plus bas
+static const std::size_t TOP_ITERS = 5'000'000;  // top O(log N) → moins d'iters
+static const unsigned    SEED      = 42;
+// ============================================================
+
+struct Student {
+    int         id;
+    std::string name;
+    double      scholarship;
+    bool operator<(const Student& o) const {
+        if (scholarship != o.scholarship) return scholarship < o.scholarship;
+        return id < o.id;
+    }
+    bool operator==(const Student& o) const { return id == o.id; }
+};
+
+// ---------- MinHeapMap ----------
+template <typename T>
+class MinHeapMap {
+    std::map<int, T> tree;
+    T&       ref(int i)       { return tree.at(i); }
+    const T& ref(int i) const { return tree.at(i); }
+    void heapify(int i) {
+        while (true) {
+            int n = (int)tree.size();
+            int l = 2*i+1, r = 2*i+2, smallest = i;
+            // Correction : '<' au lieu de '>'
+            if (l < n && ref(l) < ref(smallest)) smallest = l;
+            if (r < n && ref(r) < ref(smallest)) smallest = r;
+            if (smallest == i) break;
+            std::swap(ref(i), ref(smallest));
+            i = smallest;
+        }
+    }
+public:
+    bool empty() const { return tree.empty(); }
+    int  size()  const { return (int)tree.size(); }
+    void insert(const T& v) {
+        int idx = (int)tree.size();
+        tree[idx] = v;
+        int i = idx;
+        while (i != 0) {
+            int p = (i-1)/2;
+            // Correction : !(a < b) équivaut à (a >= b) avec seulement '<'
+            if (!(ref(i) < ref(p))) break;
+            std::swap(ref(i), ref(p));
+            i = p;
+        }
+    }
+    const T& top() const {
+        if (tree.empty()) throw std::runtime_error("top() sur heap vide");
+        return tree.at(0);
+    }
+    T pop() {
+        if (tree.empty()) throw std::runtime_error("pop() sur heap vide");
+        T root = tree.at(0);
+        int last = (int)tree.size() - 1;
+        if (last == 0) { tree.clear(); return root; }
+        tree[0] = tree.at(last);
+        tree.erase(last);
+        heapify(0);
+        return root;
+    }
+    bool deleteKey(const T& key) {
+        int idx = -1;
+        for (const auto& kv : tree) if (kv.second == key) { idx = kv.first; break; }
+        if (idx == -1) return false;
+        int last = (int)tree.size() - 1;
+        if (idx == last) { tree.erase(last); return true; }
+        tree[idx] = tree.at(last);
+        tree.erase(last);
+        int i = idx;
+        while (i != 0) {
+            int p = (i-1)/2;
+            // Correction : '<' au lieu de '>='
+            if (!(ref(i) < ref(p))) break;
+            std::swap(ref(i), ref(p)); i = p;
+        }
+        heapify(i);
+        return true;
+    }
+};
+
+using Clock = std::chrono::high_resolution_clock;
+static double ms(Clock::time_point a, Clock::time_point b) {
+    return std::chrono::duration<double, std::milli>(b - a).count();
+}
+static std::string fmt_u(std::uint64_t v) {
+    std::string s = std::to_string(v), out; int c = 0;
+    for (int i = (int)s.size()-1; i >= 0; --i) {
+        out.push_back(s[i]);
+        if (++c == 3 && i != 0) { out.push_back(' '); c = 0; }
+    }
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
+int main() {
+    std::mt19937_64 rng(SEED);
+    std::uniform_int_distribution<int>    dist_name(0, 9999);
+    std::uniform_real_distribution<double> dist_sch(0.0, 10'000.0);
+
+    std::vector<Student> data(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        data[i].id          = (int)i;
+        data[i].name        = "etu" + std::to_string(dist_name(rng));
+        data[i].scholarship = dist_sch(rng);
+    }
+
+    std::cout << "===============================================================\n";
+    std::cout << "  [MAP]   Étudiants boursiers — N = " << fmt_u(N) << "\n";
+    std::cout << "  /!\\ O(log^2 N) par insert/pop — plus lent\n";
+    std::cout << "===============================================================\n\n";
+
+    MinHeapMap<Student> heap;
+
+    auto t0 = Clock::now();
+    for (std::size_t i = 0; i < N; ++i) heap.insert(data[i]);
+    auto t1 = Clock::now();
+    double ins_ms = ms(t0, t1);
+    double ins_ns = ins_ms * 1e6 / (double)N;
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << "Insert   : " << std::setw(12) << ins_ms << " ms | " << ins_ns << " ns/op\n";
+
+    volatile long long sink = 0;
+    t0 = Clock::now();
+    for (std::size_t i = 0; i < TOP_ITERS; ++i) sink += (long long)heap.top().id;
+    t1 = Clock::now();
+    double top_ms = ms(t0, t1);
+    double top_ns = top_ms * 1e6 / (double)TOP_ITERS;
+    std::cout << "Top x" << fmt_u(TOP_ITERS) << " : " << std::setw(12) << top_ms
+              << " ms | " << top_ns << " ns/op\n";
+
+    std::size_t half = heap.size() / 2;
+    double sum_pop = 0.0;
+    t0 = Clock::now();
+    for (std::size_t i = 0; i < half; ++i) sum_pop += heap.pop().scholarship;
+    t1 = Clock::now();
+    double pop_ms = ms(t0, t1);
+    double pop_ns = pop_ms * 1e6 / (double)half;
+    std::cout << "Pop " << fmt_u(half) << " : " << std::setw(12) << pop_ms
+              << " ms | " << pop_ns << " ns/op   (somme = "
+              << std::setprecision(0) << sum_pop << " €)\n";
+
+    std::vector<int> ids_to_delete(DEL_COUNT);
+    for (std::size_t i = 0; i < DEL_COUNT; ++i) ids_to_delete[i] = (int)i;
+    std::shuffle(ids_to_delete.begin(), ids_to_delete.end(), rng);
+
+    t0 = Clock::now();
+    std::size_t del_ok = 0;
+    for (int id : ids_to_delete) { Student p; p.id = id; if (heap.deleteKey(p)) ++del_ok; }
+    t1 = Clock::now();
+    double del_ms = ms(t0, t1);
+    double del_ns = del_ms * 1e6 / (double)DEL_COUNT;
+    std::cout << "DeleteKey x" << fmt_u(DEL_COUNT) << " : " << std::setw(12) << del_ms
+              << " ms | " << del_ns << " ns/op   (" << del_ok << " supprimés)\n\n";
+
+    std::cout << "----------------------------- RÉCAP -----------------------------\n";
+    std::cout << std::left  << std::setw(14) << "Opération"
+              << std::right << std::setw(16) << "total (ms)"
+              << std::setw(14) << "ns/op"
+              << std::setw(20) << "complexité" << "\n";
+    std::cout << std::string(64, '-') << "\n";
+    std::cout << std::left  << std::setw(14) << "insert"       << std::right
+              << std::setw(16) << ins_ms << std::setw(14) << ins_ns << std::setw(20) << "O(log^2 N)" << "\n";
+    std::cout << std::left  << std::setw(14) << "top"          << std::right
+              << std::setw(16) << top_ms << std::setw(14) << top_ns << std::setw(20) << "O(log N)"   << "\n";
+    std::cout << std::left  << std::setw(14) << "pop (extract)"<< std::right
+              << std::setw(16) << pop_ms << std::setw(14) << pop_ns << std::setw(20) << "O(log^2 N)" << "\n";
+    std::cout << std::left  << std::setw(14) << "deleteKey"    << std::right
+              << std::setw(16) << del_ms << std::setw(14) << del_ns << std::setw(20) << "O(N)"       << "\n";
+    std::cout << "----------------------------------------------------------------\n";
+    std::cout << "Sink = " << sink << "\n";
+    std::cout << "moins boursier restant : " << heap.top().scholarship << " € (id "
+              << heap.top().id << ")\n";
+    return 0;
+}
+
+
+/*
+resultat terminal:
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas/Problematique_Exemple$ ./bench_students_map
+===============================================================
+  [MAP]   Étudiants boursiers — N = 1 000 000
+  /!\ O(log^2 N) par insert/pop — plus lent
+===============================================================
+
+Insert   :      1462.34 ms | 1462.34 ns/op
+Top x5 000 000 :       234.29 ms | 46.86 ns/op
+Pop 500 000 :     11722.99 ms | 23445.97 ns/op   (somme = 1249507804 €)
+DeleteKey x5 000 :        38538 ms | 7707627 ns/op   (2508 supprimés)
+
+----------------------------- RÉCAP -----------------------------
+Opération          total (ms)         ns/op         complexité
+----------------------------------------------------------------
+insert                    1462          1462          O(log^2 N)
+top                        234            47            O(log N)
+pop (extract)            11723         23446          O(log^2 N)
+deleteKey                38538       7707627                O(N)
+----------------------------------------------------------------
+Sink = 1790345000000
+moins boursier restant : 5000 € (id 789309)
+*/
+</file>
+
+<file path="Problematique_Exemple/bench_students_raw.cpp">
+// bench_students_raw.cpp — MinHeapRaw sur Student (boursiers)
+// Compilation :
+//   g++ -std=c++17 -O2 -Wall -Wextra -o bench_students_raw bench_students_raw.cpp
+// Exécution :
+//   ./bench_students_raw
+//
+// Problème : N = 1 000 000 étudiants, extraire toujours le moins boursier.
+// Opérations mesurées : insert / top / pop (extract-min) / deleteKey (retirer un id).
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <random>
+#include <chrono>
+#include <iomanip>
+#include <algorithm>
+#include <cstdint>
+#include <stdexcept>
+
+// ============================================================
+static const std::size_t N            = 1'000'000; // taille du jeu de données
+static const std::size_t DEL_COUNT    = 10'000;    // nb de deleteKey mesurés
+static const std::size_t TOP_ITERS    = 50'000'000;// itérations de top()
+static const unsigned    SEED         = 42;
+// ============================================================
+
+// ---------- Domaine métier ----------
+struct Student {
+    int         id;
+    std::string name;
+    double      scholarship; // montant de la bourse en €
+
+    // min-heap : on veut que le moins boursier soit "le plus grand".
+    // Départage par id si montants égaux (stable, évite les == ambigus).
+    bool operator<(const Student& o) const {
+        if (scholarship != o.scholarship) return scholarship < o.scholarship;
+        return id < o.id;
+    }
+    bool operator==(const Student& o) const { return id == o.id; }
+};
+
+static std::ostream& operator<<(std::ostream& os, const Student& s) {
+    return os << "Student{id=" << s.id
+              << ", name=\"" << s.name << "\""
+              << ", scholarship=" << s.scholarship << "€}";
+}
+
+// ---------- MinHeapRaw (tableau brut) ----------
+template <typename T>
+class MinHeapRaw {
+    T*   buf;
+    int  sz;
+    int  cap;
+    void grow() {
+        int newCap = (cap == 0) ? 8 : cap * 2;
+        T* newBuf = new T[newCap];
+        for (int i = 0; i < sz; ++i) newBuf[i] = buf[i];
+        delete[] buf;
+        buf = newBuf;
+        cap = newCap;
+    }
+    void heapify(int i) {
+        while (true) {
+            int l = 2*i+1, r = 2*i+2, smallest = i;
+            // Correction : utiliser '<' (convention C++17, pas de synthèse de '>')
+            if (l < sz && buf[l] < buf[smallest]) smallest = l;
+            if (r < sz && buf[r] < buf[smallest]) smallest = r;
+            if (smallest == i) break;
+            T tmp = buf[i]; buf[i] = buf[smallest]; buf[smallest] = tmp;
+            i = smallest;
+        }
+    }
+public:
+    MinHeapRaw() : buf(nullptr), sz(0), cap(0) {}
+    MinHeapRaw(const MinHeapRaw&) = delete;
+    MinHeapRaw& operator=(const MinHeapRaw&) = delete;
+    ~MinHeapRaw() { delete[] buf; }
+    bool empty() const { return sz == 0; }
+    int  size()  const { return sz; }
+    void reserve(int n) {
+        if (n <= cap) return;
+        T* nb = new T[n];
+        for (int i = 0; i < sz; ++i) nb[i] = buf[i];
+        delete[] buf; buf = nb; cap = n;
+    }
+    void insert(const T& v) {
+        if (sz == cap) grow();
+        buf[sz++] = v;
+        int i = sz - 1;
+        while (i != 0 && buf[i] < buf[(i-1)/2]) {
+            T t = buf[i]; buf[i] = buf[(i-1)/2]; buf[(i-1)/2] = t;
+            i = (i-1)/2;
+        }
+    }
+    const T& top() const {
+        if (sz == 0) throw std::runtime_error("top() sur heap vide");
+        return buf[0];
+    }
+    T pop() {
+        if (sz == 0) throw std::runtime_error("pop() sur heap vide");
+        T root = buf[0];
+        buf[0] = buf[--sz];
+        if (sz > 0) heapify(0);
+        return root;
+    }
+    bool deleteKey(const T& key) {
+        int idx = -1;
+        for (int i = 0; i < sz; ++i) if (buf[i] == key) { idx = i; break; }
+        if (idx == -1) return false;
+        if (idx == sz-1) { --sz; return true; }
+        buf[idx] = buf[--sz];
+        int i = idx;
+        while (i != 0 && buf[i] < buf[(i-1)/2]) {
+            T t = buf[i]; buf[i] = buf[(i-1)/2]; buf[(i-1)/2] = t;
+            i = (i-1)/2;
+        }
+        heapify(i);
+        return true;
+    }
+};
+
+using Clock = std::chrono::high_resolution_clock;
+static double ms(Clock::time_point a, Clock::time_point b) {
+    return std::chrono::duration<double, std::milli>(b - a).count();
+}
+static std::string fmt_u(std::uint64_t v) {
+    std::string s = std::to_string(v), out; int c = 0;
+    for (int i = (int)s.size()-1; i >= 0; --i) {
+        out.push_back(s[i]);
+        if (++c == 3 && i != 0) { out.push_back(' '); c = 0; }
+    }
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
+int main() {
+    std::mt19937_64 rng(SEED);
+    std::uniform_int_distribution<int>    dist_id(0, 10'000'000);
+    std::uniform_real_distribution<double> dist_sch(0.0, 10'000.0);
+    std::uniform_int_distribution<int>    dist_name(0, 9999);
+
+    // ---- Génération (hors mesure) ----
+    std::vector<Student> data(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        data[i].id          = (int)i;
+        data[i].name        = "etu" + std::to_string(dist_name(rng));
+        data[i].scholarship = dist_sch(rng);
+    }
+
+    std::cout << "===============================================================\n";
+    std::cout << "  [RAW]   Étudiants boursiers — N = " << fmt_u(N) << "\n";
+    std::cout << "  insert / top (le + boursier) / pop (= extract-min) / deleteKey\n";
+    std::cout << "===============================================================\n\n";
+
+    MinHeapRaw<Student> heap;
+    heap.reserve((int)N);
+
+    // ---- 1) INSERT ----
+    auto t0 = Clock::now();
+    for (std::size_t i = 0; i < N; ++i) heap.insert(data[i]);
+    auto t1 = Clock::now();
+    double ins_ms = ms(t0, t1);
+    double ins_ns = ins_ms * 1e6 / (double)N;
+    std::cout << "Insert   : " << std::setw(12) << std::fixed << std::setprecision(2)
+              << ins_ms << " ms | " << ins_ns << " ns/op\n";
+
+    // ---- 2) TOP ----
+    volatile long long sink = 0;
+    t0 = Clock::now();
+    for (std::size_t i = 0; i < TOP_ITERS; ++i) sink += (long long)heap.top().id;
+    t1 = Clock::now();
+    double top_ms = ms(t0, t1);
+    double top_ns = top_ms * 1e6 / (double)TOP_ITERS;
+    std::cout << "Top x" << fmt_u(TOP_ITERS) << " : " << std::setw(12) << top_ms
+              << " ms | " << top_ns << " ns/op\n";
+
+    // ---- 3) POP (extraire le moins boursier, moitié) ----
+    std::size_t half = heap.size() / 2;
+    double sum_pop = 0.0;
+    t0 = Clock::now();
+    for (std::size_t i = 0; i < half; ++i) {
+        Student s = heap.pop();
+        sum_pop += s.scholarship;
+    }
+    t1 = Clock::now();
+    double pop_ms = ms(t0, t1);
+    double pop_ns = pop_ms * 1e6 / (double)half;
+    std::cout << "Pop " << fmt_u(half) << " : " << std::setw(12) << pop_ms
+              << " ms | " << pop_ns << " ns/op   (somme bourses extraites = "
+              << std::fixed << std::setprecision(0) << sum_pop << " €)\n";
+
+    // ---- 4) DELETE KEY (retirer DEL_COUNT étudiants par id) ----
+    std::vector<int> ids_to_delete(DEL_COUNT);
+    for (std::size_t i = 0; i < DEL_COUNT; ++i) ids_to_delete[i] = (int)i;
+    std::shuffle(ids_to_delete.begin(), ids_to_delete.end(), rng);
+
+    t0 = Clock::now();
+    std::size_t del_ok = 0;
+    for (int id : ids_to_delete) {
+        Student probe; probe.id = id;
+        if (heap.deleteKey(probe)) ++del_ok;
+    }
+    t1 = Clock::now();
+    double del_ms = ms(t0, t1);
+    double del_ns = del_ms * 1e6 / (double)DEL_COUNT;
+    std::cout << "DeleteKey x" << fmt_u(DEL_COUNT) << " : " << std::setw(12) << del_ms
+              << " ms | " << del_ns << " ns/op   (" << del_ok << " supprimés)\n\n";
+
+    // ---- Tableau final ----
+    std::cout << "----------------------------- RÉCAP -----------------------------\n";
+    std::cout << std::left  << std::setw(14) << "Opération"
+              << std::right << std::setw(16) << "total (ms)"
+              << std::setw(14) << "ns/op"
+              << std::setw(20) << "complexité" << "\n";
+    std::cout << std::string(64, '-') << "\n";
+    std::cout << std::left  << std::setw(14) << "insert"
+              << std::right << std::setw(16) << ins_ms
+              << std::setw(14) << ins_ns << std::setw(20) << "O(log N)" << "\n";
+    std::cout << std::left  << std::setw(14) << "top"
+              << std::right << std::setw(16) << top_ms
+              << std::setw(14) << top_ns << std::setw(20) << "O(1)" << "\n";
+    std::cout << std::left  << std::setw(14) << "pop (extract)"
+              << std::right << std::setw(16) << pop_ms
+              << std::setw(14) << pop_ns << std::setw(20) << "O(log N)" << "\n";
+    std::cout << std::left  << std::setw(14) << "deleteKey"
+              << std::right << std::setw(16) << del_ms
+              << std::setw(14) << del_ns << std::setw(20) << "O(N)" << "\n";
+    std::cout << "----------------------------------------------------------------\n";
+    std::cout << "Sink = " << sink << " (empêche l'optimisation)\n";
+    // Utilisation de operator<< : supprime le warning -Wunused-function
+    std::cout << "moins boursier restant : " << heap.top() << "\n";
+    return 0;
+}
+
+
+/*
+resultat terminal:
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas/Problematique_Exemple$ ./bench_students_raw
+===============================================================
+  [RAW]   Étudiants boursiers — N = 1 000 000
+  insert / top (le + boursier) / pop (= extract-min) / deleteKey
+===============================================================
+
+Insert   :        71.89 ms | 71.89 ns/op
+Top x50 000 000 :        24.46 ms | 0.49 ns/op
+Pop 500 000 :       591.67 ms | 1183.34 ns/op   (somme bourses extraites = 1249507804 €)
+DeleteKey x10 000 :        13135 ms | 1313469 ns/op   (4984 supprimés)
+
+----------------------------- RÉCAP -----------------------------
+Opération          total (ms)         ns/op         complexité
+----------------------------------------------------------------
+insert                      72            72            O(log N)
+top                         24             0                O(1)
+pop (extract)              592          1183            O(log N)
+deleteKey                13135       1313469                O(N)
+----------------------------------------------------------------
+Sink = 17903450000000 (empêche l'optimisation)
+moins boursier restant : Student{id=789309, name="etu6045", scholarship=5000€}
+*/
+</file>
+
+<file path="Problematique_Exemple/bench_students_vector.cpp">
+// bench_students_vector.cpp — MinHeapVector sur Student (boursiers)
+// Compilation : g++ -std=c++17 -O2 -Wall -Wextra -o bench_students_vector bench_students_vector.cpp
+// Exécution   : ./bench_students_vector
+//
+// Identique au RAW mais avec std::vector<Student> comme stockage.
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <random>
+#include <chrono>
+#include <iomanip>
+#include <algorithm>
+#include <cstdint>
+#include <stdexcept>
+
+// ============================================================
+static const std::size_t N            = 1'000'000;
+static const std::size_t DEL_COUNT    = 10'000;
+static const std::size_t TOP_ITERS    = 50'000'000;
+static const unsigned    SEED         = 42;
+// ============================================================
+
+struct Student {
+    int         id;
+    std::string name;
+    double      scholarship;
+    bool operator<(const Student& o) const {
+        if (scholarship != o.scholarship) return scholarship < o.scholarship;
+        return id < o.id;
+    }
+    bool operator==(const Student& o) const { return id == o.id; }
+};
+
+// ---------- MinHeapVector ----------
+template <typename T>
+class MinHeapVector {
+    std::vector<T> arr;
+    void heapify(int i) {
+        while (true) {
+            int n = (int)arr.size();
+            int l = 2*i+1, r = 2*i+2, smallest = i;
+            // Correction : utiliser '<' (convention C++17)
+            if (l < n && arr[l] < arr[smallest]) smallest = l;
+            if (r < n && arr[r] < arr[smallest]) smallest = r;
+            if (smallest == i) break;
+            std::swap(arr[i], arr[smallest]);
+            i = smallest;
+        }
+    }
+public:
+    void reserve(std::size_t n) { arr.reserve(n); }
+    bool empty() const { return arr.empty(); }
+    int  size()  const { return (int)arr.size(); }
+    void insert(const T& v) {
+        arr.push_back(v);
+        int i = (int)arr.size() - 1;
+        while (i != 0 && arr[i] < arr[(i-1)/2]) {
+            std::swap(arr[i], arr[(i-1)/2]);
+            i = (i-1)/2;
+        }
+    }
+    const T& top() const {
+        if (arr.empty()) throw std::runtime_error("top() sur heap vide");
+        return arr[0];
+    }
+    T pop() {
+        if (arr.empty()) throw std::runtime_error("pop() sur heap vide");
+        T root = arr[0];
+        arr[0] = arr.back();
+        arr.pop_back();
+        if (!arr.empty()) heapify(0);
+        return root;
+    }
+    bool deleteKey(const T& key) {
+        int n = (int)arr.size(), idx = -1;
+        for (int i = 0; i < n; ++i) if (arr[i] == key) { idx = i; break; }
+        if (idx == -1) return false;
+        if (idx == n-1) { arr.pop_back(); return true; }
+        arr[idx] = arr.back(); arr.pop_back();
+        int i = idx;
+        while (i != 0 && arr[i] < arr[(i-1)/2]) {
+            std::swap(arr[i], arr[(i-1)/2]); i = (i-1)/2;
+        }
+        heapify(i);
+        return true;
+    }
+};
+
+using Clock = std::chrono::high_resolution_clock;
+static double ms(Clock::time_point a, Clock::time_point b) {
+    return std::chrono::duration<double, std::milli>(b - a).count();
+}
+static std::string fmt_u(std::uint64_t v) {
+    std::string s = std::to_string(v), out; int c = 0;
+    for (int i = (int)s.size()-1; i >= 0; --i) {
+        out.push_back(s[i]);
+        if (++c == 3 && i != 0) { out.push_back(' '); c = 0; }
+    }
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
+int main() {
+    std::mt19937_64 rng(SEED);
+    std::uniform_int_distribution<int>    dist_id(0, 10'000'000);
+    std::uniform_real_distribution<double> dist_sch(0.0, 10'000.0);
+    std::uniform_int_distribution<int>    dist_name(0, 9999);
+
+    std::vector<Student> data(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        data[i].id          = (int)i;
+        data[i].name        = "etu" + std::to_string(dist_name(rng));
+        data[i].scholarship = dist_sch(rng);
+    }
+
+    std::cout << "===============================================================\n";
+    std::cout << "  [VECTOR]   Étudiants boursiers — N = " << fmt_u(N) << "\n";
+    std::cout << "===============================================================\n\n";
+
+    MinHeapVector<Student> heap;
+    heap.reserve(N);
+
+    auto t0 = Clock::now();
+    for (std::size_t i = 0; i < N; ++i) heap.insert(data[i]);
+    auto t1 = Clock::now();
+    double ins_ms = ms(t0, t1);
+    double ins_ns = ins_ms * 1e6 / (double)N;
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << "Insert   : " << std::setw(12) << ins_ms << " ms | " << ins_ns << " ns/op\n";
+
+    volatile long long sink = 0;
+    t0 = Clock::now();
+    for (std::size_t i = 0; i < TOP_ITERS; ++i) sink += (long long)heap.top().id;
+    t1 = Clock::now();
+    double top_ms = ms(t0, t1);
+    double top_ns = top_ms * 1e6 / (double)TOP_ITERS;
+    std::cout << "Top x" << fmt_u(TOP_ITERS) << " : " << std::setw(12) << top_ms
+              << " ms | " << top_ns << " ns/op\n";
+
+    std::size_t half = heap.size() / 2;
+    double sum_pop = 0.0;
+    t0 = Clock::now();
+    for (std::size_t i = 0; i < half; ++i) sum_pop += heap.pop().scholarship;
+    t1 = Clock::now();
+    double pop_ms = ms(t0, t1);
+    double pop_ns = pop_ms * 1e6 / (double)half;
+    std::cout << "Pop " << fmt_u(half) << " : " << std::setw(12) << pop_ms
+              << " ms | " << pop_ns << " ns/op   (somme = "
+              << std::setprecision(0) << sum_pop << " €)\n";
+
+    std::vector<int> ids_to_delete(DEL_COUNT);
+    for (std::size_t i = 0; i < DEL_COUNT; ++i) ids_to_delete[i] = (int)i;
+    std::shuffle(ids_to_delete.begin(), ids_to_delete.end(), rng);
+
+    t0 = Clock::now();
+    std::size_t del_ok = 0;
+    for (int id : ids_to_delete) { Student p; p.id = id; if (heap.deleteKey(p)) ++del_ok; }
+    t1 = Clock::now();
+    double del_ms = ms(t0, t1);
+    double del_ns = del_ms * 1e6 / (double)DEL_COUNT;
+    std::cout << "DeleteKey x" << fmt_u(DEL_COUNT) << " : " << std::setw(12) << del_ms
+              << " ms | " << del_ns << " ns/op   (" << del_ok << " supprimés)\n\n";
+
+    std::cout << "----------------------------- RÉCAP -----------------------------\n";
+    std::cout << std::left  << std::setw(14) << "Opération"
+              << std::right << std::setw(16) << "total (ms)"
+              << std::setw(14) << "ns/op"
+              << std::setw(20) << "complexité" << "\n";
+    std::cout << std::string(64, '-') << "\n";
+    std::cout << std::left  << std::setw(14) << "insert"      << std::right
+              << std::setw(16) << ins_ms << std::setw(14) << ins_ns << std::setw(20) << "O(log N)" << "\n";
+    std::cout << std::left  << std::setw(14) << "top"         << std::right
+              << std::setw(16) << top_ms << std::setw(14) << top_ns << std::setw(20) << "O(1)"     << "\n";
+    std::cout << std::left  << std::setw(14) << "pop (extract)"<< std::right
+              << std::setw(16) << pop_ms << std::setw(14) << pop_ns << std::setw(20) << "O(log N)" << "\n";
+    std::cout << std::left  << std::setw(14) << "deleteKey"   << std::right
+              << std::setw(16) << del_ms << std::setw(14) << del_ns << std::setw(20) << "O(N)"     << "\n";
+    std::cout << "----------------------------------------------------------------\n";
+    std::cout << "Sink = " << sink << "\n";
+    std::cout << "moins boursier restant : " << heap.top().scholarship << " € (id "
+              << heap.top().id << ")\n";
+    return 0;
+}
+
+/*
+resultat terminal:
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas/Problematique_Exemple$ ./bench_students_vector
+===============================================================
+  [VECTOR]   Étudiants boursiers — N = 1 000 000
+===============================================================
+
+Insert   :        66.57 ms | 66.57 ns/op
+Top x50 000 000 :        25.13 ms | 0.50 ns/op
+Pop 500 000 :       364.95 ms | 729.90 ns/op   (somme = 1249507804 €)
+DeleteKey x10 000 :        11406 ms | 1140632 ns/op   (4984 supprimés)
+
+----------------------------- RÉCAP -----------------------------
+Opération          total (ms)         ns/op         complexité
+----------------------------------------------------------------
+insert                      67            67            O(log N)
+top                         25             1                O(1)
+pop (extract)              365           730            O(log N)
+deleteKey                11406       1140632                O(N)
+----------------------------------------------------------------
+Sink = 17903450000000
+moins boursier restant : 5000 € (id 789309)
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas/Problematique_Exemple$ 
+*/
+</file>
+
+<file path="bench_heap_list_scale.cpp">
+// bench_heap_list_scale.cpp
+// Benchmark MinHeapList (std::list) — 100% self-contained, AUCUN argument CLI.
+//
+// Compilation :
+//   g++ -std=c++17 -O2 -Wall -Wextra -o bench_heap_list_scale bench_heap_list_scale.cpp
+// Exécution :
+//   ./bench_heap_list_scale
+//
+// Toutes les tailles et le budget temps se règlent dans les constantes
+// ci-dessous (SIZES, BUDGET_MS, DEL_CAP, TOP_ITERS).
+//
+// !!! COMPLEXITÉ !!!
+//   insert    : O(N) par op (std::next dans la remontée)
+//   pop       : O(N) par op (std::next dans heapify)
+//   deleteKey : O(N) par op (recherche + std::next + heapify)
+//   top       : O(1)
+//   => inutile de monter à 1e8 : ça ne terminerait pas.
+
+#include <iostream>
+#include <list>
+#include <iterator>
+#include <vector>
+#include <random>
+#include <chrono>
+#include <iomanip>
+#include <algorithm>
+#include <string>
+#include <cstdint>
+#include <stdexcept>
+
+// ============================================================
+//  CONFIGURATION — modifie ici, rien à passer en ligne de commande
+// ============================================================
+static const std::vector<std::size_t> SIZES = {
+    100ULL, 300ULL, 1'000ULL, 3'000ULL, 10'000ULL, 30'000ULL, 100'000ULL
+};
+static const double BUDGET_MS = 5000.0;   // budget max par phase (ms)
+static const std::size_t DEL_CAP = 2'000; // deleteKey : cap du nombre d'ops
+static const std::size_t TOP_ITERS = 5'000'000; // itérations pour top()
+static const unsigned SEED = 42;
+// ============================================================
+
+// ---------- MinHeapList (copie minimale de heap_list.cpp) ----------
+template <typename T>
+class MinHeapList {
+    std::list<T> lst;
+
+    typename std::list<T>::iterator at(int i) {
+        return std::next(lst.begin(), i);
+    }
+    void heapify(int i) {
+        int n = (int)lst.size();
+        int l = 2*i + 1, r = 2*i + 2, smallest = i;
+        auto itSmallest = at(smallest);
+        if (l < n) { auto itL = at(l); if (*itL < *itSmallest) { smallest = l; itSmallest = itL; } }
+        if (r < n) { auto itR = at(r); if (*itR < *itSmallest) { smallest = r; itSmallest = itR; } }
+        if (smallest != i) { std::swap(*at(i), *at(smallest)); heapify(smallest); }
+    }
+public:
+    bool empty() const { return lst.empty(); }
+    int  size()  const { return (int)lst.size(); }
+
+    void insert(const T& v) {
+        lst.push_back(v);
+        int i = (int)lst.size() - 1;
+        while (i != 0) {
+            int p = (i - 1) / 2;
+            auto itI = at(i), itP = at(p);
+            if (*itP <= *itI) break;
+            std::swap(*itI, *itP);
+            i = p;
+        }
+    }
+    const T& top() const {
+        if (lst.empty()) throw std::runtime_error("top() sur heap vide");
+        return lst.front();
+    }
+    T pop() {
+        if (lst.empty()) throw std::runtime_error("pop() sur heap vide");
+        T root = lst.front();
+        *lst.begin() = lst.back();
+        lst.pop_back();
+        if (!lst.empty()) heapify(0);
+        return root;
+    }
+    bool deleteKey(const T& key) {
+        int n = (int)lst.size(), idx = -1, k = 0;
+        for (auto it = lst.begin(); it != lst.end(); ++it, ++k) {
+            if (*it == key) { idx = k; break; }
+        }
+        if (idx == -1) return false;
+        if (idx == n-1) { lst.pop_back(); return true; }
+        *at(idx) = lst.back();
+        lst.pop_back();
+        int i = idx;
+        while (i != 0) {
+            int p = (i-1)/2;
+            auto itI = at(i), itP = at(p);
+            if (*itP <= *itI) break;
+            std::swap(*itI, *itP);
+            i = p;
+        }
+        heapify(i);
+        return true;
+    }
+};
+
+using Clock = std::chrono::high_resolution_clock;
+static double ms(Clock::time_point a, Clock::time_point b) {
+    return std::chrono::duration<double, std::milli>(b - a).count();
+}
+
+static std::string fmt_u(std::uint64_t v) {
+    std::string s = std::to_string(v), out;
+    int c = 0;
+    for (int i = (int)s.size() - 1; i >= 0; --i) {
+        out.push_back(s[i]);
+        if (++c == 3 && i != 0) { out.push_back(' '); c = 0; }
+    }
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
+struct Row {
+    std::size_t N = 0;
+    double ins_ms = 0; std::size_t ins_done = 0; bool ins_abort = false;
+    double top_ms = 0; std::size_t top_iters = 0;
+    double pop_ms = 0; std::size_t pop_done = 0; bool pop_abort = false;
+    double del_ms = 0; std::size_t del_done = 0; bool del_abort = false;
+};
+
+static Row run_one(std::size_t N, std::mt19937_64& rng) {
+    Row r; r.N = N;
+    std::uniform_int_distribution<int> dist(0, 10'000'000);
+
+    std::vector<int> data(N);
+    for (auto& x : data) x = dist(rng);
+
+    // ---- INSERT (budget) ----
+    MinHeapList<int> h;
+    {
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < N; ++i) {
+            h.insert(data[i]);
+            ++r.ins_done;
+            if ((i & 0x3F) == 0 && ms(t0, Clock::now()) > BUDGET_MS) {
+                r.ins_abort = true; break;
+            }
+        }
+        r.ins_ms = ms(t0, Clock::now());
+    }
+
+    // ---- TOP ----
+    if (!h.empty()) {
+        r.top_iters = TOP_ITERS;
+        volatile long long sink = 0;
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < r.top_iters; ++i) sink += h.top();
+        r.top_ms = ms(t0, Clock::now());
+        (void)sink;
+    }
+
+    // ---- POP (moitié, budget) ----
+    {
+        std::size_t half = h.size() / 2;
+        volatile long long sink = 0;
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < half; ++i) {
+            sink += h.pop();
+            ++r.pop_done;
+            if ((i & 0x3F) == 0 && ms(t0, Clock::now()) > BUDGET_MS) {
+                r.pop_abort = true; break;
+            }
+        }
+        r.pop_ms = ms(t0, Clock::now());
+        (void)sink;
+    }
+
+    // ---- DELETE KEY (cap + budget) ----
+    std::size_t del_count = std::min<std::size_t>(N, DEL_CAP);
+    if (del_count > 0) {
+        MinHeapList<int> hd;
+        std::vector<int> keys(del_count);
+        for (std::size_t i = 0; i < del_count; ++i) { int v = (int)i; hd.insert(v); keys[i] = v; }
+        std::shuffle(keys.begin(), keys.end(), rng);
+
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < del_count; ++i) {
+            hd.deleteKey(keys[i]);
+            ++r.del_done;
+            if ((i & 0x0F) == 0 && ms(t0, Clock::now()) > BUDGET_MS) {
+                r.del_abort = true; break;
+            }
+        }
+        r.del_ms = ms(t0, Clock::now());
+    }
+    return r;
+}
+
+int main() {
+    std::mt19937_64 rng(SEED);
+
+    std::cout << "================================================================\n";
+    std::cout << "  Benchmark MinHeapList (std::list) — self-contained\n";
+    std::cout << "  Budget/phase = " << BUDGET_MS << " ms | DEL_CAP = " << DEL_CAP
+              << " | TOP_ITERS = " << fmt_u(TOP_ITERS) << "\n";
+    std::cout << "  /!\\ insert/pop/deleteKey = O(N) par op, top = O(1)\n";
+    std::cout << "================================================================\n\n";
+
+    std::vector<Row> rows;
+    rows.reserve(SIZES.size());
+
+    for (std::size_t N : SIZES) {
+        std::cout << ">>> Exécution N = " << fmt_u(N) << " ... " << std::flush;
+        Row r = run_one(N, rng);
+        rows.push_back(r);
+        std::cout << "OK";
+        if (r.ins_abort) std::cout << " [insert ABORT]";
+        if (r.pop_abort) std::cout << " [pop ABORT]";
+        if (r.del_abort) std::cout << " [deleteKey ABORT]";
+        std::cout << "\n";
+    }
+
+    std::cout << "\nRÉSULTATS DÉTAILLÉS\n-------------------\n\n";
+    std::cout << std::fixed << std::setprecision(2);
+
+    for (const auto& r : rows) {
+        double ins_ns = r.ins_done ? r.ins_ms * 1e6 / (double)r.ins_done : 0.0;
+        double top_ns = r.top_iters ? r.top_ms * 1e6 / (double)r.top_iters : 0.0;
+        double pop_ns = r.pop_done ? r.pop_ms * 1e6 / (double)r.pop_done : 0.0;
+        double del_ns = r.del_done ? r.del_ms * 1e6 / (double)r.del_done : 0.0;
+
+        std::cout << "N = " << fmt_u(r.N) << "\n";
+        std::cout << "  Insert   : " << std::setw(12) << r.ins_ms << " ms | "
+                  << std::setw(14) << ins_ns << " ns/op ("
+                  << fmt_u(r.ins_done) << " / " << fmt_u(r.N)
+                  << (r.ins_abort ? ", ABORT" : "") << ")\n";
+        std::cout << "  Top      : " << std::setw(12) << r.top_ms << " ms | "
+                  << std::setw(14) << top_ns << " ns/op ("
+                  << fmt_u(r.top_iters) << " iters)\n";
+        std::cout << "  Pop      : " << std::setw(12) << r.pop_ms << " ms | "
+                  << std::setw(14) << pop_ns << " ns/op ("
+                  << fmt_u(r.pop_done) << (r.pop_abort ? ", ABORT" : "") << ")\n";
+        std::cout << "  DeleteKey: " << std::setw(12) << r.del_ms << " ms | "
+                  << std::setw(14) << del_ns << " ns/op ("
+                  << fmt_u(r.del_done) << (r.del_abort ? ", ABORT" : "") << ")\n\n";
+    }
+
+    // Tableau récap
+    std::cout << "TABLEAU RÉCAPITULATIF (ns/op)\n-----------------------------\n";
+    std::cout << std::left  << std::setw(12) << "N"
+              << std::right << std::setw(16) << "insert"
+              << std::setw(14) << "top"
+              << std::setw(16) << "pop"
+              << std::setw(16) << "deleteKey" << "\n";
+    std::cout << std::string(74, '-') << "\n";
+    auto nso = [](const Row& r, int kind) -> double {
+        switch (kind) {
+            case 0: return r.ins_done ? r.ins_ms * 1e6 / (double)r.ins_done : 0.0;
+            case 1: return r.top_iters ? r.top_ms * 1e6 / (double)r.top_iters : 0.0;
+            case 2: return r.pop_done ? r.pop_ms * 1e6 / (double)r.pop_done : 0.0;
+            default:return r.del_done ? r.del_ms * 1e6 / (double)r.del_done : 0.0;
+        }
+    };
+    for (const auto& r : rows) {
+        std::cout << std::left  << std::setw(12) << fmt_u(r.N)
+                  << std::right << std::setw(16) << nso(r,0)
+                  << std::setw(14) << nso(r,1)
+                  << std::setw(16) << nso(r,2)
+                  << std::setw(16) << nso(r,3) << "\n";
+    }
+
+    // Ratios
+    std::cout << "\nRATIOS ns/op entre N et N/10\n-----------------------------\n";
+    std::cout << "Attendu MinHeapList : top ~1 | insert/pop/delete ~10 (~O(N) par op)\n\n";
+    std::cout << std::left  << std::setw(18) << "N"
+              << std::right << std::setw(14) << "insert"
+              << std::setw(14) << "top"
+              << std::setw(14) << "pop"
+              << std::setw(14) << "deleteKey" << "\n";
+    std::cout << std::string(74, '-') << "\n";
+    for (std::size_t i = 1; i < rows.size(); ++i) {
+        const auto& a = rows[i-1];
+        const auto& b = rows[i];
+        auto ratio = [](double x, double y) -> double { return (x > 0.0 && y > 0.0) ? y / x : 0.0; };
+        std::cout << std::left  << std::setw(18) << (fmt_u(b.N) + " / " + fmt_u(a.N))
+                  << std::right << std::setw(14) << ratio(nso(a,0), nso(b,0))
+                  << std::setw(14) << ratio(nso(a,1), nso(b,1))
+                  << std::setw(14) << ratio(nso(a,2), nso(b,2))
+                  << std::setw(14) << ratio(nso(a,3), nso(b,3)) << "\n";
+    }
+
+    std::cout << "\nTerminé.\n";
+    return 0;
+}
+
+/*
+resultat terminal:
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas$ ./bench_heap_list_scale
+================================================================
+  Benchmark MinHeapList (std::list) — self-contained
+  Budget/phase = 5000 ms | DEL_CAP = 2000 | TOP_ITERS = 5 000 000
+  /!\ insert/pop/deleteKey = O(N) par op, top = O(1)
+================================================================
+
+>>> Exécution N = 100 ... OK
+>>> Exécution N = 300 ... OK
+>>> Exécution N = 1 000 ... OK
+>>> Exécution N = 3 000 ... OK
+>>> Exécution N = 10 000 ... OK
+>>> Exécution N = 30 000 ... OK [pop ABORT]
+>>> Exécution N = 100 000 ... OK [insert ABORT] [pop ABORT]
+
+RÉSULTATS DÉTAILLÉS
+-------------------
+
+N = 100
+  Insert   :         0.02 ms |         181.35 ns/op (100 / 100)
+  Top      :         2.44 ms |           0.49 ns/op (5 000 000 iters)
+  Pop      :         0.03 ms |         516.62 ns/op (50)
+  DeleteKey:         0.03 ms |         259.62 ns/op (100)
+
+N = 300
+  Insert   :         0.19 ms |         630.95 ns/op (300 / 300)
+  Top      :         3.02 ms |           0.60 ns/op (5 000 000 iters)
+  Pop      :         0.25 ms |        1689.33 ns/op (150)
+  DeleteKey:         0.25 ms |         835.13 ns/op (300)
+
+N = 1 000
+  Insert   :         1.96 ms |        1964.44 ns/op (1 000 / 1 000)
+  Top      :         2.50 ms |           0.50 ns/op (5 000 000 iters)
+  Pop      :         4.17 ms |        8331.83 ns/op (500)
+  DeleteKey:         3.80 ms |        3799.61 ns/op (1 000)
+
+N = 3 000
+  Insert   :        27.17 ms |        9058.12 ns/op (3 000 / 3 000)
+  Top      :         4.73 ms |           0.95 ns/op (5 000 000 iters)
+  Pop      :        41.66 ms |       27775.36 ns/op (1 500)
+  DeleteKey:        15.55 ms |        7773.94 ns/op (2 000)
+
+N = 10 000
+  Insert   :       266.61 ms |       26660.87 ns/op (10 000 / 10 000)
+  Top      :         2.40 ms |           0.48 ns/op (5 000 000 iters)
+  Pop      :       576.26 ms |      115251.55 ns/op (5 000)
+  DeleteKey:        17.60 ms |        8801.36 ns/op (2 000)
+
+N = 30 000
+  Insert   :      2817.60 ms |       93920.02 ns/op (30 000 / 30 000)
+  Top      :         2.23 ms |           0.45 ns/op (5 000 000 iters)
+  Pop      :      5008.27 ms |      391240.59 ns/op (12 801, ABORT)
+  DeleteKey:        17.45 ms |        8727.00 ns/op (2 000)
+
+N = 100 000
+  Insert   :      5019.40 ms |      123505.75 ns/op (40 641 / 100 000, ABORT)
+  Top      :        11.06 ms |           2.21 ns/op (5 000 000 iters)
+  Pop      :      5025.67 ms |      643574.40 ns/op (7 809, ABORT)
+  DeleteKey:        18.69 ms |        9346.90 ns/op (2 000)
+
+TABLEAU RÉCAPITULATIF (ns/op)
+-----------------------------
+N                     insert           top             pop       deleteKey
+--------------------------------------------------------------------------
+100                   181.35          0.49          516.62          259.62
+300                   630.95          0.60         1689.33          835.13
+1 000                1964.44          0.50         8331.83         3799.61
+3 000                9058.12          0.95        27775.36         7773.94
+10 000              26660.87          0.48       115251.55         8801.36
+30 000              93920.02          0.45       391240.59         8727.00
+100 000            123505.75          2.21       643574.40         9346.90
+
+RATIOS ns/op entre N et N/10
+-----------------------------
+Attendu MinHeapList : top ~1 | insert/pop/delete ~10 (~O(N) par op)
+
+N                         insert           top           pop     deleteKey
+--------------------------------------------------------------------------
+300 / 100                   3.48          1.24          3.27          3.22
+1 000 / 300                 3.11          0.83          4.93          4.55
+3 000 / 1 000               4.61          1.90          3.33          2.05
+10 000 / 3 000              2.94          0.51          4.15          1.13
+30 000 / 10 000             3.52          0.93          3.39          0.99
+100 000 / 30 000            1.32          4.95          1.64          1.07
+
+Terminé.
+*/
+</file>
+
+<file path="bench_heap_map_scale.cpp">
+// bench_heap_map_scale.cpp
+// Benchmark MinHeapMap (std::map<int,T>) — 100% self-contained, AUCUN argument CLI.
+//
+// Compilation :
+//   g++ -std=c++17 -O2 -Wall -Wextra -o bench_heap_map_scale bench_heap_map_scale.cpp
+// Exécution :
+//   ./bench_heap_map_scale
+//
+// Règlages : constantes SIZES / BUDGET_MS / DEL_CAP / TOP_ITERS ci-dessous.
+//
+// !!! COMPLEXITÉ !!!
+//   insert    : O(log^2 N)  (O(log N) accès map x O(log N) niveaux)
+//   pop       : O(log^2 N)
+//   deleteKey : O(N) recherche + O(log^2 N) remontée/descente
+//   top       : O(log N) via tree.at(0)  (et non O(1) comme vector)
+//   => on plafonne à 1e6, sinon insert complet = plusieurs minutes.
+
+#include <iostream>
+#include <map>
+#include <vector>
+#include <random>
+#include <chrono>
+#include <iomanip>
+#include <algorithm>
+#include <string>
+#include <cstdint>
+#include <stdexcept>
+
+// ============================================================
+//  CONFIGURATION — modifie ici, rien à passer en ligne de commande
+// ============================================================
+static const std::vector<std::size_t> SIZES = {
+    100ULL, 1'000ULL, 10'000ULL, 100'000ULL, 1'000'000ULL
+};
+static const double BUDGET_MS = 15000.0;   // budget max par phase (ms)
+static const std::size_t DEL_CAP = 5'000;  // deleteKey : cap du nombre d'ops
+static const std::size_t TOP_ITERS = 5'000'000; // itérations pour top()
+static const unsigned SEED = 42;
+// ============================================================
+
+// ---------- MinHeapMap (copie minimale de heap_map.cpp) ----------
+template <typename T>
+class MinHeapMap {
+    std::map<int, T> tree;
+
+    T&       ref(int i)       { return tree.at(i); }
+    const T& ref(int i) const { return tree.at(i); }
+
+    void heapify(int i) {
+        int n = (int)tree.size();
+        int l = 2*i+1, r = 2*i+2, smallest = i;
+        if (l < n && ref(l) < ref(smallest)) smallest = l;
+        if (r < n && ref(r) < ref(smallest)) smallest = r;
+        if (smallest != i) {
+            std::swap(ref(i), ref(smallest));
+            heapify(smallest);
+        }
+    }
+public:
+    bool empty() const { return tree.empty(); }
+    int  size()  const { return (int)tree.size(); }
+
+    void insert(const T& v) {
+        int idx = (int)tree.size();
+        tree[idx] = v;
+        int i = idx;
+        while (i != 0) {
+            int p = (i-1)/2;
+            if (ref(p) <= ref(i)) break;
+            std::swap(ref(i), ref(p));
+            i = p;
+        }
+    }
+    const T& top() const {
+        if (tree.empty()) throw std::runtime_error("top() sur heap vide");
+        return tree.at(0);
+    }
+    T pop() {
+        if (tree.empty()) throw std::runtime_error("pop() sur heap vide");
+        T root = tree.at(0);
+        int last = (int)tree.size() - 1;
+        if (last == 0) { tree.clear(); return root; }
+        tree[0] = tree.at(last);
+        tree.erase(last);
+        heapify(0);
+        return root;
+    }
+    bool deleteKey(const T& key) {
+        int idx = -1;
+        for (const auto& kv : tree) {
+            if (kv.second == key) { idx = kv.first; break; }
+        }
+        if (idx == -1) return false;
+        int last = (int)tree.size() - 1;
+        if (idx == last) { tree.erase(last); return true; }
+        tree[idx] = tree.at(last);
+        tree.erase(last);
+        int i = idx;
+        while (i != 0) {
+            int p = (i-1)/2;
+            if (ref(p) <= ref(i)) break;
+            std::swap(ref(i), ref(p));
+            i = p;
+        }
+        heapify(i);
+        return true;
+    }
+};
+
+using Clock = std::chrono::high_resolution_clock;
+static double ms(Clock::time_point a, Clock::time_point b) {
+    return std::chrono::duration<double, std::milli>(b - a).count();
+}
+
+static std::string fmt_u(std::uint64_t v) {
+    std::string s = std::to_string(v), out;
+    int c = 0;
+    for (int i = (int)s.size() - 1; i >= 0; --i) {
+        out.push_back(s[i]);
+        if (++c == 3 && i != 0) { out.push_back(' '); c = 0; }
+    }
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
+struct Row {
+    std::size_t N = 0;
+    double ins_ms = 0; std::size_t ins_done = 0; bool ins_abort = false;
+    double top_ms = 0; std::size_t top_iters = 0;
+    double pop_ms = 0; std::size_t pop_done = 0; bool pop_abort = false;
+    double del_ms = 0; std::size_t del_done = 0; bool del_abort = false;
+};
+
+static Row run_one(std::size_t N, std::mt19937_64& rng) {
+    Row r; r.N = N;
+    std::uniform_int_distribution<int> dist(0, 10'000'000);
+
+    std::vector<int> data(N);
+    for (auto& x : data) x = dist(rng);
+
+    // ---- INSERT (budget) ----
+    MinHeapMap<int> h;
+    {
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < N; ++i) {
+            h.insert(data[i]);
+            ++r.ins_done;
+            if ((i & 0x3F) == 0 && ms(t0, Clock::now()) > BUDGET_MS) {
+                r.ins_abort = true; break;
+            }
+        }
+        r.ins_ms = ms(t0, Clock::now());
+    }
+
+    // ---- TOP ----
+    if (!h.empty()) {
+        r.top_iters = TOP_ITERS;
+        volatile long long sink = 0;
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < r.top_iters; ++i) sink += h.top();
+        r.top_ms = ms(t0, Clock::now());
+        (void)sink;
+    }
+
+    // ---- POP (moitié, budget) ----
+    {
+        std::size_t half = h.size() / 2;
+        volatile long long sink = 0;
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < half; ++i) {
+            sink += h.pop();
+            ++r.pop_done;
+            if ((i & 0x3F) == 0 && ms(t0, Clock::now()) > BUDGET_MS) {
+                r.pop_abort = true; break;
+            }
+        }
+        r.pop_ms = ms(t0, Clock::now());
+        (void)sink;
+    }
+
+    // ---- DELETE KEY (cap + budget) ----
+    std::size_t del_count = std::min<std::size_t>(N, DEL_CAP);
+    if (del_count > 0) {
+        MinHeapMap<int> hd;
+        std::vector<int> keys(del_count);
+        for (std::size_t i = 0; i < del_count; ++i) { int v = (int)i; hd.insert(v); keys[i] = v; }
+        std::shuffle(keys.begin(), keys.end(), rng);
+
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < del_count; ++i) {
+            hd.deleteKey(keys[i]);
+            ++r.del_done;
+            if ((i & 0x0F) == 0 && ms(t0, Clock::now()) > BUDGET_MS) {
+                r.del_abort = true; break;
+            }
+        }
+        r.del_ms = ms(t0, Clock::now());
+    }
+    return r;
+}
+
+int main() {
+    std::mt19937_64 rng(SEED);
+
+    std::cout << "================================================================\n";
+    std::cout << "  Benchmark MinHeapMap (std::map) — self-contained\n";
+    std::cout << "  Budget/phase = " << BUDGET_MS << " ms | DEL_CAP = " << DEL_CAP
+              << " | TOP_ITERS = " << fmt_u(TOP_ITERS) << "\n";
+    std::cout << "  /!\\ insert/pop = O(log^2 N), top = O(log N), deleteKey = O(N)\n";
+    std::cout << "================================================================\n\n";
+
+    std::vector<Row> rows;
+    rows.reserve(SIZES.size());
+
+    for (std::size_t N : SIZES) {
+        std::cout << ">>> Exécution N = " << fmt_u(N) << " ... " << std::flush;
+        Row r = run_one(N, rng);
+        rows.push_back(r);
+        std::cout << "OK";
+        if (r.ins_abort) std::cout << " [insert ABORT]";
+        if (r.pop_abort) std::cout << " [pop ABORT]";
+        if (r.del_abort) std::cout << " [deleteKey ABORT]";
+        std::cout << "\n";
+    }
+
+    std::cout << "\nRÉSULTATS DÉTAILLÉS\n-------------------\n\n";
+    std::cout << std::fixed << std::setprecision(2);
+
+    for (const auto& r : rows) {
+        double ins_ns = r.ins_done ? r.ins_ms * 1e6 / (double)r.ins_done : 0.0;
+        double top_ns = r.top_iters ? r.top_ms * 1e6 / (double)r.top_iters : 0.0;
+        double pop_ns = r.pop_done ? r.pop_ms * 1e6 / (double)r.pop_done : 0.0;
+        double del_ns = r.del_done ? r.del_ms * 1e6 / (double)r.del_done : 0.0;
+
+        std::cout << "N = " << fmt_u(r.N) << "\n";
+        std::cout << "  Insert   : " << std::setw(12) << r.ins_ms << " ms | "
+                  << std::setw(14) << ins_ns << " ns/op ("
+                  << fmt_u(r.ins_done) << " / " << fmt_u(r.N)
+                  << (r.ins_abort ? ", ABORT" : "") << ")\n";
+        std::cout << "  Top      : " << std::setw(12) << r.top_ms << " ms | "
+                  << std::setw(14) << top_ns << " ns/op ("
+                  << fmt_u(r.top_iters) << " iters)\n";
+        std::cout << "  Pop      : " << std::setw(12) << r.pop_ms << " ms | "
+                  << std::setw(14) << pop_ns << " ns/op ("
+                  << fmt_u(r.pop_done) << (r.pop_abort ? ", ABORT" : "") << ")\n";
+        std::cout << "  DeleteKey: " << std::setw(12) << r.del_ms << " ms | "
+                  << std::setw(14) << del_ns << " ns/op ("
+                  << fmt_u(r.del_done) << (r.del_abort ? ", ABORT" : "") << ")\n\n";
+    }
+
+    // Tableau récap
+    std::cout << "TABLEAU RÉCAPITULATIF (ns/op)\n-----------------------------\n";
+    std::cout << std::left  << std::setw(12) << "N"
+              << std::right << std::setw(16) << "insert"
+              << std::setw(14) << "top"
+              << std::setw(16) << "pop"
+              << std::setw(16) << "deleteKey" << "\n";
+    std::cout << std::string(74, '-') << "\n";
+    auto nso = [](const Row& r, int kind) -> double {
+        switch (kind) {
+            case 0: return r.ins_done ? r.ins_ms * 1e6 / (double)r.ins_done : 0.0;
+            case 1: return r.top_iters ? r.top_ms * 1e6 / (double)r.top_iters : 0.0;
+            case 2: return r.pop_done ? r.pop_ms * 1e6 / (double)r.pop_done : 0.0;
+            default:return r.del_done ? r.del_ms * 1e6 / (double)r.del_done : 0.0;
+        }
+    };
+    for (const auto& r : rows) {
+        std::cout << std::left  << std::setw(12) << fmt_u(r.N)
+                  << std::right << std::setw(16) << nso(r,0)
+                  << std::setw(14) << nso(r,1)
+                  << std::setw(16) << nso(r,2)
+                  << std::setw(16) << nso(r,3) << "\n";
+    }
+
+    // Ratios
+    std::cout << "\nRATIOS ns/op entre N et N/10\n-----------------------------\n";
+    std::cout << "Attendu MinHeapMap : top ~log(N) (≈1.2-1.5 entre N et N/10)\n";
+    std::cout << "                     insert/pop ~log^2 => ratio ≈ 1.5-2\n";
+    std::cout << "                     deleteKey ~O(N) => ratio ≈ 10\n\n";
+    std::cout << std::left  << std::setw(18) << "N"
+              << std::right << std::setw(14) << "insert"
+              << std::setw(14) << "top"
+              << std::setw(14) << "pop"
+              << std::setw(14) << "deleteKey" << "\n";
+    std::cout << std::string(74, '-') << "\n";
+    for (std::size_t i = 1; i < rows.size(); ++i) {
+        const auto& a = rows[i-1];
+        const auto& b = rows[i];
+        auto ratio = [](double x, double y) -> double { return (x > 0.0 && y > 0.0) ? y / x : 0.0; };
+        std::cout << std::left  << std::setw(18) << (fmt_u(b.N) + " / " + fmt_u(a.N))
+                  << std::right << std::setw(14) << ratio(nso(a,0), nso(b,0))
+                  << std::setw(14) << ratio(nso(a,1), nso(b,1))
+                  << std::setw(14) << ratio(nso(a,2), nso(b,2))
+                  << std::setw(14) << ratio(nso(a,3), nso(b,3)) << "\n";
+    }
+
+    std::cout << "\nTerminé.\n";
+    return 0;
+}
+
+/*
+resultat terminal:
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas$ ./bench_heap_map_scale
+================================================================
+  Benchmark MinHeapMap (std::map) — self-contained
+  Budget/phase = 15000 ms | DEL_CAP = 5000 | TOP_ITERS = 5 000 000
+  /!\ insert/pop = O(log^2 N), top = O(log N), deleteKey = O(N)
+================================================================
+
+>>> Exécution N = 100 ... OK
+>>> Exécution N = 1 000 ... OK
+>>> Exécution N = 10 000 ... OK
+>>> Exécution N = 100 000 ... OK
+>>> Exécution N = 1 000 000 ... OK
+
+RÉSULTATS DÉTAILLÉS
+-------------------
+
+N = 100
+  Insert   :         0.04 ms |         384.46 ns/op (100 / 100)
+  Top      :        27.21 ms |           5.44 ns/op (5 000 000 iters)
+  Pop      :         0.06 ms |        1128.98 ns/op (50)
+  DeleteKey:         0.08 ms |         800.68 ns/op (100)
+
+N = 1 000
+  Insert   :         0.47 ms |         474.20 ns/op (1 000 / 1 000)
+  Top      :        50.60 ms |          10.12 ns/op (5 000 000 iters)
+  Pop      :         1.14 ms |        2276.72 ns/op (500)
+  DeleteKey:         1.94 ms |        1939.95 ns/op (1 000)
+
+N = 10 000
+  Insert   :         6.67 ms |         666.85 ns/op (10 000 / 10 000)
+  Top      :        62.33 ms |          12.47 ns/op (5 000 000 iters)
+  Pop      :        19.57 ms |        3913.64 ns/op (5 000)
+  DeleteKey:        48.24 ms |        9647.39 ns/op (5 000)
+
+N = 100 000
+  Insert   :       110.08 ms |        1100.79 ns/op (100 000 / 100 000)
+  Top      :       137.34 ms |          27.47 ns/op (5 000 000 iters)
+  Pop      :       500.84 ms |       10016.81 ns/op (50 000)
+  DeleteKey:        46.34 ms |        9267.05 ns/op (5 000)
+
+N = 1 000 000
+  Insert   :      1680.47 ms |        1680.47 ns/op (1 000 000 / 1 000 000)
+  Top      :       225.30 ms |          45.06 ns/op (5 000 000 iters)
+  Pop      :      8886.24 ms |       17772.47 ns/op (500 000)
+  DeleteKey:        42.54 ms |        8508.00 ns/op (5 000)
+
+TABLEAU RÉCAPITULATIF (ns/op)
+-----------------------------
+N                     insert           top             pop       deleteKey
+--------------------------------------------------------------------------
+100                   384.46          5.44         1128.98          800.68
+1 000                 474.20         10.12         2276.72         1939.95
+10 000                666.85         12.47         3913.64         9647.39
+100 000              1100.79         27.47        10016.81         9267.05
+1 000 000            1680.47         45.06        17772.47         8508.00
+
+RATIOS ns/op entre N et N/10
+-----------------------------
+Attendu MinHeapMap : top ~log(N) (≈1.2-1.5 entre N et N/10)
+                     insert/pop ~log^2 => ratio ≈ 1.5-2
+                     deleteKey ~O(N) => ratio ≈ 10
+
+N                         insert           top           pop     deleteKey
+--------------------------------------------------------------------------
+1 000 / 100                 1.23          1.86          2.02          2.42
+10 000 / 1 000              1.41          1.23          1.72          4.97
+100 000 / 10 000            1.65          2.20          2.56          0.96
+1 000 000 / 100 000          1.53          1.64          1.77          0.92
+
+Terminé.
+*/
+</file>
+
+<file path="bench_heap_raw_scale.cpp">
+// bench_heap_raw_scale.cpp
+// Benchmark MinHeapRaw (tableau brut new/delete) — self-contained, AUCUN argument CLI.
+//
+// Compilation :
+//   g++ -std=c++17 -O2 -Wall -Wextra -o bench_heap_raw_scale bench_heap_raw_scale.cpp
+// Exécution :
+//   ./bench_heap_raw_scale
+//
+// Règlages : constantes SIZES / BUDGET_MS / DEL_CAP / TOP_ITERS ci-dessous.
+//
+// Complexités :
+//   insert    : O(log N) amorti (grow ×2 → O(1) amorti)
+//   pop       : O(log N)
+//   top       : O(1)
+//   deleteKey : O(N) (recherche linéaire) + O(log N) remontée/descente
+//   => on peut monter à 1e8 (prévoir ~1 Go de RAM : data + buffer).
+
+#include <iostream>
+#include <vector>
+#include <random>
+#include <chrono>
+#include <iomanip>
+#include <algorithm>
+#include <string>
+#include <cstdint>
+#include <stdexcept>
+
+// ============================================================
+//  CONFIGURATION — modifie ici, rien à passer en ligne de commande
+// ============================================================
+static const std::vector<std::size_t> SIZES = {
+    100ULL, 1'000ULL, 10'000ULL, 100'000ULL,
+    1'000'000ULL, 10'000'000ULL, 100'000'000ULL
+};
+static const double BUDGET_MS = 30000.0;   // budget max par phase (ms)
+static const std::size_t DEL_CAP = 10'000; // deleteKey : cap du nombre d'ops
+static const std::size_t TOP_ITERS = 50'000'000; // itérations pour top()
+static const unsigned SEED = 42;
+// ============================================================
+
+// ---------- MinHeapRaw (copie minimale de heap_raw.cpp) ----------
+template <typename T>
+class MinHeapRaw {
+    T*   buf;
+    int  sz;
+    int  cap;
+
+    void grow() {
+        int newCap = (cap == 0) ? 8 : cap * 2;
+        T* newBuf = new T[newCap];
+        for (int i = 0; i < sz; ++i) newBuf[i] = buf[i];
+        delete[] buf;
+        buf = newBuf;
+        cap = newCap;
+    }
+    void heapify(int i) {
+        // Version itérative pour éviter la récursion profonde (sécurité à 1e8)
+        while (true) {
+            int l = 2*i+1, r = 2*i+2, smallest = i;
+            if (l < sz && buf[l] < buf[smallest]) smallest = l;
+            if (r < sz && buf[r] < buf[smallest]) smallest = r;
+            if (smallest == i) break;
+            T tmp = buf[i]; buf[i] = buf[smallest]; buf[smallest] = tmp;
+            i = smallest;
+        }
+    }
+public:
+    MinHeapRaw() : buf(nullptr), sz(0), cap(0) {}
+    MinHeapRaw(const MinHeapRaw&) = delete;
+    MinHeapRaw& operator=(const MinHeapRaw&) = delete;
+    ~MinHeapRaw() { delete[] buf; }
+
+    bool empty() const { return sz == 0; }
+    int  size()  const { return sz; }
+
+    void reserve(int n) {
+        if (n <= cap) return;
+        T* newBuf = new T[n];
+        for (int i = 0; i < sz; ++i) newBuf[i] = buf[i];
+        delete[] buf;
+        buf = newBuf;
+        cap = n;
+    }
+
+    void insert(const T& v) {
+        if (sz == cap) grow();
+        buf[sz++] = v;
+        int i = sz - 1;
+        while (i != 0 && buf[i] < buf[(i-1)/2]) {
+            T tmp = buf[i]; buf[i] = buf[(i-1)/2]; buf[(i-1)/2] = tmp;
+            i = (i-1)/2;
+        }
+    }
+    const T& top() const {
+        if (sz == 0) throw std::runtime_error("top() sur heap vide");
+        return buf[0];
+    }
+    T pop() {
+        if (sz == 0) throw std::runtime_error("pop() sur heap vide");
+        T root = buf[0];
+        buf[0] = buf[--sz];
+        if (sz > 0) heapify(0);
+        return root;
+    }
+    bool deleteKey(const T& key) {
+        int idx = -1;
+        for (int i = 0; i < sz; ++i) if (buf[i] == key) { idx = i; break; }
+        if (idx == -1) return false;
+        if (idx == sz-1) { --sz; return true; }
+        buf[idx] = buf[--sz];
+        int i = idx;
+        while (i != 0 && buf[i] < buf[(i-1)/2]) {
+            T tmp = buf[i]; buf[i] = buf[(i-1)/2]; buf[(i-1)/2] = tmp;
+            i = (i-1)/2;
+        }
+        heapify(i);
+        return true;
+    }
+};
+
+using Clock = std::chrono::high_resolution_clock;
+static double ms(Clock::time_point a, Clock::time_point b) {
+    return std::chrono::duration<double, std::milli>(b - a).count();
+}
+
+static std::string fmt_u(std::uint64_t v) {
+    std::string s = std::to_string(v), out;
+    int c = 0;
+    for (int i = (int)s.size() - 1; i >= 0; --i) {
+        out.push_back(s[i]);
+        if (++c == 3 && i != 0) { out.push_back(' '); c = 0; }
+    }
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
+struct Row {
+    std::size_t N = 0;
+    double ins_ms = 0; std::size_t ins_done = 0; bool ins_abort = false;
+    double top_ms = 0; std::size_t top_iters = 0;
+    double pop_ms = 0; std::size_t pop_done = 0; bool pop_abort = false;
+    double del_ms = 0; std::size_t del_done = 0; bool del_abort = false;
+};
+
+static Row run_one(std::size_t N, std::mt19937_64& rng) {
+    Row r; r.N = N;
+    std::uniform_int_distribution<int> dist(0, 10'000'000);
+
+    std::vector<int> data(N);
+    for (auto& x : data) x = dist(rng);
+
+    // ---- INSERT (budget) ----
+    MinHeapRaw<int> h;
+    h.reserve((int)N); // évite les realloc : on mesure le vrai insert, pas grow()
+    {
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < N; ++i) {
+            h.insert(data[i]);
+            ++r.ins_done;
+            if ((i & 0x3F) == 0 && ms(t0, Clock::now()) > BUDGET_MS) {
+                r.ins_abort = true; break;
+            }
+        }
+        r.ins_ms = ms(t0, Clock::now());
+    }
+
+    // ---- TOP ----
+    if (!h.empty()) {
+        r.top_iters = TOP_ITERS;
+        volatile long long sink = 0;
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < r.top_iters; ++i) sink += h.top();
+        r.top_ms = ms(t0, Clock::now());
+        (void)sink;
+    }
+
+    // ---- POP (moitié, budget) ----
+    {
+        std::size_t half = h.size() / 2;
+        volatile long long sink = 0;
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < half; ++i) {
+            sink += h.pop();
+            ++r.pop_done;
+            if ((i & 0x3F) == 0 && ms(t0, Clock::now()) > BUDGET_MS) {
+                r.pop_abort = true; break;
+            }
+        }
+        r.pop_ms = ms(t0, Clock::now());
+        (void)sink;
+    }
+
+    // ---- DELETE KEY (cap + budget) ----
+    std::size_t del_count = std::min<std::size_t>(N, DEL_CAP);
+    if (del_count > 0) {
+        MinHeapRaw<int> hd;
+        hd.reserve((int)del_count);
+        std::vector<int> keys(del_count);
+        for (std::size_t i = 0; i < del_count; ++i) { int v = (int)i; hd.insert(v); keys[i] = v; }
+        std::shuffle(keys.begin(), keys.end(), rng);
+
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < del_count; ++i) {
+            hd.deleteKey(keys[i]);
+            ++r.del_done;
+            if ((i & 0x0F) == 0 && ms(t0, Clock::now()) > BUDGET_MS) {
+                r.del_abort = true; break;
+            }
+        }
+        r.del_ms = ms(t0, Clock::now());
+    }
+    return r;
+}
+
+int main() {
+    std::mt19937_64 rng(SEED);
+
+    std::cout << "================================================================\n";
+    std::cout << "  Benchmark MinHeapRaw (tableau brut new/delete) — self-contained\n";
+    std::cout << "  Budget/phase = " << BUDGET_MS << " ms | DEL_CAP = " << DEL_CAP
+              << " | TOP_ITERS = " << fmt_u(TOP_ITERS) << "\n";
+    std::cout << "  /!\\ insert/pop = O(log N), top = O(1), deleteKey = O(N)\n";
+    std::cout << "  /!\\ N = 1e8 : ~1 Go de RAM (data + buffer)\n";
+    std::cout << "================================================================\n\n";
+
+    std::vector<Row> rows;
+    rows.reserve(SIZES.size());
+
+    for (std::size_t N : SIZES) {
+        std::cout << ">>> Exécution N = " << fmt_u(N) << " ... " << std::flush;
+        Row r = run_one(N, rng);
+        rows.push_back(r);
+        std::cout << "OK";
+        if (r.ins_abort) std::cout << " [insert ABORT]";
+        if (r.pop_abort) std::cout << " [pop ABORT]";
+        if (r.del_abort) std::cout << " [deleteKey ABORT]";
+        std::cout << "\n";
+    }
+
+    std::cout << "\nRÉSULTATS DÉTAILLÉS\n-------------------\n\n";
+    std::cout << std::fixed << std::setprecision(2);
+
+    for (const auto& r : rows) {
+        double ins_ns = r.ins_done ? r.ins_ms * 1e6 / (double)r.ins_done : 0.0;
+        double top_ns = r.top_iters ? r.top_ms * 1e6 / (double)r.top_iters : 0.0;
+        double pop_ns = r.pop_done ? r.pop_ms * 1e6 / (double)r.pop_done : 0.0;
+        double del_ns = r.del_done ? r.del_ms * 1e6 / (double)r.del_done : 0.0;
+
+        std::cout << "N = " << fmt_u(r.N) << "\n";
+        std::cout << "  Insert   : " << std::setw(12) << r.ins_ms << " ms | "
+                  << std::setw(14) << ins_ns << " ns/op ("
+                  << fmt_u(r.ins_done) << " / " << fmt_u(r.N)
+                  << (r.ins_abort ? ", ABORT" : "") << ")\n";
+        std::cout << "  Top      : " << std::setw(12) << r.top_ms << " ms | "
+                  << std::setw(14) << top_ns << " ns/op ("
+                  << fmt_u(r.top_iters) << " iters)\n";
+        std::cout << "  Pop      : " << std::setw(12) << r.pop_ms << " ms | "
+                  << std::setw(14) << pop_ns << " ns/op ("
+                  << fmt_u(r.pop_done) << (r.pop_abort ? ", ABORT" : "") << ")\n";
+        std::cout << "  DeleteKey: " << std::setw(12) << r.del_ms << " ms | "
+                  << std::setw(14) << del_ns << " ns/op ("
+                  << fmt_u(r.del_done) << (r.del_abort ? ", ABORT" : "") << ")\n\n";
+    }
+
+    // Tableau récap
+    std::cout << "TABLEAU RÉCAPITULATIF (ns/op)\n-----------------------------\n";
+    std::cout << std::left  << std::setw(12) << "N"
+              << std::right << std::setw(16) << "insert"
+              << std::setw(14) << "top"
+              << std::setw(16) << "pop"
+              << std::setw(16) << "deleteKey" << "\n";
+    std::cout << std::string(74, '-') << "\n";
+    auto nso = [](const Row& r, int kind) -> double {
+        switch (kind) {
+            case 0: return r.ins_done ? r.ins_ms * 1e6 / (double)r.ins_done : 0.0;
+            case 1: return r.top_iters ? r.top_ms * 1e6 / (double)r.top_iters : 0.0;
+            case 2: return r.pop_done ? r.pop_ms * 1e6 / (double)r.pop_done : 0.0;
+            default:return r.del_done ? r.del_ms * 1e6 / (double)r.del_done : 0.0;
+        }
+    };
+    for (const auto& r : rows) {
+        std::cout << std::left  << std::setw(12) << fmt_u(r.N)
+                  << std::right << std::setw(16) << nso(r,0)
+                  << std::setw(14) << nso(r,1)
+                  << std::setw(16) << nso(r,2)
+                  << std::setw(16) << nso(r,3) << "\n";
+    }
+
+    // Ratios
+    std::cout << "\nRATIOS ns/op entre N et N/10\n-----------------------------\n";
+    std::cout << "Attendu MinHeapRaw : top ~1 (O(1)) | insert/pop ~1.1-1.3 (log N) |\n";
+    std::cout << "                     deleteKey ~10 (O(N))\n\n";
+    std::cout << std::left  << std::setw(18) << "N"
+              << std::right << std::setw(14) << "insert"
+              << std::setw(14) << "top"
+              << std::setw(14) << "pop"
+              << std::setw(14) << "deleteKey" << "\n";
+    std::cout << std::string(74, '-') << "\n";
+    for (std::size_t i = 1; i < rows.size(); ++i) {
+        const auto& a = rows[i-1];
+        const auto& b = rows[i];
+        auto ratio = [](double x, double y) -> double { return (x > 0.0 && y > 0.0) ? y / x : 0.0; };
+        std::cout << std::left  << std::setw(18) << (fmt_u(b.N) + " / " + fmt_u(a.N))
+                  << std::right << std::setw(14) << ratio(nso(a,0), nso(b,0))
+                  << std::setw(14) << ratio(nso(a,1), nso(b,1))
+                  << std::setw(14) << ratio(nso(a,2), nso(b,2))
+                  << std::setw(14) << ratio(nso(a,3), nso(b,3)) << "\n";
+    }
+
+    std::cout << "\nTerminé.\n";
+    return 0;
+}
+
+/*
+resultat terminal:
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas$ ./bench_heap_raw_scale
+================================================================
+  Benchmark MinHeapRaw (tableau brut new/delete) — self-contained
+  Budget/phase = 30000 ms | DEL_CAP = 10000 | TOP_ITERS = 50 000 000
+  /!\ insert/pop = O(log N), top = O(1), deleteKey = O(N)
+  /!\ N = 1e8 : ~1 Go de RAM (data + buffer)
+================================================================
+
+>>> Exécution N = 100 ... OK
+>>> Exécution N = 1 000 ... OK
+>>> Exécution N = 10 000 ... OK
+>>> Exécution N = 100 000 ... OK
+>>> Exécution N = 1 000 000 ... OK
+>>> Exécution N = 10 000 000 ... OK
+>>> Exécution N = 100 000 000 ... OK [pop ABORT]
+
+RÉSULTATS DÉTAILLÉS
+-------------------
+
+N = 100
+  Insert   :         0.00 ms |          20.99 ns/op (100 / 100)
+  Top      :        23.92 ms |           0.48 ns/op (50 000 000 iters)
+  Pop      :         0.00 ms |          78.50 ns/op (50)
+  DeleteKey:         0.01 ms |          51.36 ns/op (100)
+
+N = 1 000
+  Insert   :         0.03 ms |          25.78 ns/op (1 000 / 1 000)
+  Top      :        25.93 ms |           0.52 ns/op (50 000 000 iters)
+  Pop      :         0.04 ms |          84.99 ns/op (500)
+  DeleteKey:         0.19 ms |         189.39 ns/op (1 000)
+
+N = 10 000
+  Insert   :         0.26 ms |          26.42 ns/op (10 000 / 10 000)
+  Top      :        25.27 ms |           0.51 ns/op (50 000 000 iters)
+  Pop      :         0.61 ms |         122.16 ns/op (5 000)
+  DeleteKey:        11.44 ms |        1144.05 ns/op (10 000)
+
+N = 100 000
+  Insert   :         2.29 ms |          22.86 ns/op (100 000 / 100 000)
+  Top      :        28.02 ms |           0.56 ns/op (50 000 000 iters)
+  Pop      :         7.87 ms |         157.32 ns/op (50 000)
+  DeleteKey:        11.51 ms |        1151.20 ns/op (10 000)
+
+N = 1 000 000
+  Insert   :        20.97 ms |          20.97 ns/op (1 000 000 / 1 000 000)
+  Top      :        24.18 ms |           0.48 ns/op (50 000 000 iters)
+  Pop      :        77.77 ms |         155.55 ns/op (500 000)
+  DeleteKey:         8.94 ms |         894.16 ns/op (10 000)
+
+N = 10 000 000
+  Insert   :       171.84 ms |          17.18 ns/op (10 000 000 / 10 000 000)
+  Top      :        32.00 ms |           0.64 ns/op (50 000 000 iters)
+  Pop      :      1535.15 ms |         307.03 ns/op (5 000 000)
+  DeleteKey:         9.35 ms |         934.59 ns/op (10 000)
+
+N = 100 000 000
+  Insert   :      2003.56 ms |          20.04 ns/op (100 000 000 / 100 000 000)
+  Top      :        61.13 ms |           1.22 ns/op (50 000 000 iters)
+  Pop      :     30000.03 ms |         627.24 ns/op (47 828 673, ABORT)
+  DeleteKey:        10.83 ms |        1082.72 ns/op (10 000)
+
+TABLEAU RÉCAPITULATIF (ns/op)
+-----------------------------
+N                     insert           top             pop       deleteKey
+--------------------------------------------------------------------------
+100                    20.99          0.48           78.50           51.36
+1 000                  25.78          0.52           84.99          189.39
+10 000                 26.42          0.51          122.16         1144.05
+100 000                22.86          0.56          157.32         1151.20
+1 000 000              20.97          0.48          155.55          894.16
+10 000 000             17.18          0.64          307.03          934.59
+100 000 000            20.04          1.22          627.24         1082.72
+
+RATIOS ns/op entre N et N/10
+-----------------------------
+Attendu MinHeapRaw : top ~1 (O(1)) | insert/pop ~1.1-1.3 (log N) |
+                     deleteKey ~10 (O(N))
+
+N                         insert           top           pop     deleteKey
+--------------------------------------------------------------------------
+1 000 / 100                 1.23          1.08          1.08          3.69
+10 000 / 1 000              1.02          0.97          1.44          6.04
+100 000 / 10 000            0.87          1.11          1.29          1.01
+1 000 000 / 100 000          0.92          0.86          0.99          0.78
+10 000 000 / 1 000 000          0.82          1.32          1.97          1.05
+100 000 000 / 10 000 000          1.17          1.91          2.04          1.16
+
+Terminé.
+*/
+</file>
+
+<file path="bench_heap_vector_scale.cpp">
+// bench_heap_vector_scale.cpp
+// Benchmark MinHeapVector (std::vector) — self-contained, AUCUN argument CLI.
+//
+// Compilation :
+//   g++ -std=c++17 -O2 -Wall -Wextra -o bench_heap_vector_scale bench_heap_vector_scale.cpp
+// Exécution :
+//   ./bench_heap_vector_scale
+//
+// Règlages : constantes SIZES / BUDGET_MS / DEL_CAP / TOP_ITERS ci-dessous.
+//
+// Complexités :
+//   insert    : O(log N) amorti (push_back + remontée)
+//   pop       : O(log N)
+//   top       : O(1)
+//   deleteKey : O(N) (recherche linéaire) + O(log N) remontée/descente
+//   => on peut monter à 1e8 (prévoir ~1 Go de RAM : data + buffer).
+
+#include <iostream>
+#include <vector>
+#include <random>
+#include <chrono>
+#include <iomanip>
+#include <algorithm>
+#include <string>
+#include <cstdint>
+#include <stdexcept>
+
+// ============================================================
+//  CONFIGURATION — modifie ici, rien à passer en ligne de commande
+// ============================================================
+static const std::vector<std::size_t> SIZES = {
+    100ULL, 1'000ULL, 10'000ULL, 100'000ULL,
+    1'000'000ULL, 10'000'000ULL, 100'000'000ULL
+};
+static const double BUDGET_MS = 30000.0;   // budget max par phase (ms)
+static const std::size_t DEL_CAP = 10'000; // deleteKey : cap du nombre d'ops
+static const std::size_t TOP_ITERS = 50'000'000; // itérations pour top()
+static const unsigned SEED = 42;
+// ============================================================
+
+// ---------- MinHeapVector (copie minimale de heap_vector.cpp) ----------
+template <typename T>
+class MinHeapVector {
+    std::vector<T> arr;
+
+    void heapify(int i) {
+        // Version itérative pour éviter la récursion profonde (sécurité à 1e8)
+        while (true) {
+            int n = (int)arr.size();
+            int l = 2*i + 1, r = 2*i + 2, smallest = i;
+            if (l < n && arr[l] < arr[smallest]) smallest = l;
+            if (r < n && arr[r] < arr[smallest]) smallest = r;
+            if (smallest == i) break;
+            std::swap(arr[i], arr[smallest]);
+            i = smallest;
+        }
+    }
+public:
+    void reserve(std::size_t n) { arr.reserve(n); }
+    bool empty() const { return arr.empty(); }
+    int  size()  const { return (int)arr.size(); }
+
+    void insert(const T& v) {
+        arr.push_back(v);
+        int i = (int)arr.size() - 1;
+        while (i != 0 && arr[i] < arr[(i-1)/2]) {
+            std::swap(arr[i], arr[(i-1)/2]);
+            i = (i-1)/2;
+        }
+    }
+    const T& top() const {
+        if (arr.empty()) throw std::runtime_error("top() sur heap vide");
+        return arr[0];
+    }
+    T pop() {
+        if (arr.empty()) throw std::runtime_error("pop() sur heap vide");
+        T root = arr[0];
+        arr[0] = arr.back();
+        arr.pop_back();
+        if (!arr.empty()) heapify(0);
+        return root;
+    }
+    bool deleteKey(const T& key) {
+        int n = (int)arr.size(), idx = -1;
+        for (int i = 0; i < n; ++i) if (arr[i] == key) { idx = i; break; }
+        if (idx == -1) return false;
+        if (idx == n-1) { arr.pop_back(); return true; }
+        arr[idx] = arr.back(); arr.pop_back();
+        int i = idx;
+        while (i != 0 && arr[i] < arr[(i-1)/2]) {
+            std::swap(arr[i], arr[(i-1)/2]); i = (i-1)/2;
+        }
+        heapify(i);
+        return true;
+    }
+};
+
+using Clock = std::chrono::high_resolution_clock;
+static double ms(Clock::time_point a, Clock::time_point b) {
+    return std::chrono::duration<double, std::milli>(b - a).count();
+}
+
+static std::string fmt_u(std::uint64_t v) {
+    std::string s = std::to_string(v), out;
+    int c = 0;
+    for (int i = (int)s.size() - 1; i >= 0; --i) {
+        out.push_back(s[i]);
+        if (++c == 3 && i != 0) { out.push_back(' '); c = 0; }
+    }
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
+struct Row {
+    std::size_t N = 0;
+    double ins_ms = 0; std::size_t ins_done = 0; bool ins_abort = false;
+    double top_ms = 0; std::size_t top_iters = 0;
+    double pop_ms = 0; std::size_t pop_done = 0; bool pop_abort = false;
+    double del_ms = 0; std::size_t del_done = 0; bool del_abort = false;
+};
+
+static Row run_one(std::size_t N, std::mt19937_64& rng) {
+    Row r; r.N = N;
+    std::uniform_int_distribution<int> dist(0, 10'000'000);
+
+    std::vector<int> data(N);
+    for (auto& x : data) x = dist(rng);
+
+    // ---- INSERT (budget) ----
+    MinHeapVector<int> h;
+    h.reserve(N); // évite les realloc : on mesure le vrai insert, pas la croissance
+    {
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < N; ++i) {
+            h.insert(data[i]);
+            ++r.ins_done;
+            if ((i & 0x3F) == 0 && ms(t0, Clock::now()) > BUDGET_MS) {
+                r.ins_abort = true; break;
+            }
+        }
+        r.ins_ms = ms(t0, Clock::now());
+    }
+
+    // ---- TOP ----
+    if (!h.empty()) {
+        r.top_iters = TOP_ITERS;
+        volatile long long sink = 0;
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < r.top_iters; ++i) sink += h.top();
+        r.top_ms = ms(t0, Clock::now());
+        (void)sink;
+    }
+
+    // ---- POP (moitié, budget) ----
+    {
+        std::size_t half = h.size() / 2;
+        volatile long long sink = 0;
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < half; ++i) {
+            sink += h.pop();
+            ++r.pop_done;
+            if ((i & 0x3F) == 0 && ms(t0, Clock::now()) > BUDGET_MS) {
+                r.pop_abort = true; break;
+            }
+        }
+        r.pop_ms = ms(t0, Clock::now());
+        (void)sink;
+    }
+
+    // ---- DELETE KEY (cap + budget) ----
+    std::size_t del_count = std::min<std::size_t>(N, DEL_CAP);
+    if (del_count > 0) {
+        MinHeapVector<int> hd;
+        hd.reserve(del_count);
+        std::vector<int> keys(del_count);
+        for (std::size_t i = 0; i < del_count; ++i) { int v = (int)i; hd.insert(v); keys[i] = v; }
+        std::shuffle(keys.begin(), keys.end(), rng);
+
+        auto t0 = Clock::now();
+        for (std::size_t i = 0; i < del_count; ++i) {
+            hd.deleteKey(keys[i]);
+            ++r.del_done;
+            if ((i & 0x0F) == 0 && ms(t0, Clock::now()) > BUDGET_MS) {
+                r.del_abort = true; break;
+            }
+        }
+        r.del_ms = ms(t0, Clock::now());
+    }
+    return r;
+}
+
+int main() {
+    std::mt19937_64 rng(SEED);
+
+    std::cout << "================================================================\n";
+    std::cout << "  Benchmark MinHeapVector (std::vector) — self-contained\n";
+    std::cout << "  Budget/phase = " << BUDGET_MS << " ms | DEL_CAP = " << DEL_CAP
+              << " | TOP_ITERS = " << fmt_u(TOP_ITERS) << "\n";
+    std::cout << "  /!\\ insert/pop = O(log N), top = O(1), deleteKey = O(N)\n";
+    std::cout << "  /!\\ N = 1e8 : ~1 Go de RAM (data + buffer)\n";
+    std::cout << "================================================================\n\n";
+
+    std::vector<Row> rows;
+    rows.reserve(SIZES.size());
+
+    for (std::size_t N : SIZES) {
+        std::cout << ">>> Exécution N = " << fmt_u(N) << " ... " << std::flush;
+        Row r = run_one(N, rng);
+        rows.push_back(r);
+        std::cout << "OK";
+        if (r.ins_abort) std::cout << " [insert ABORT]";
+        if (r.pop_abort) std::cout << " [pop ABORT]";
+        if (r.del_abort) std::cout << " [deleteKey ABORT]";
+        std::cout << "\n";
+    }
+
+    std::cout << "\nRÉSULTATS DÉTAILLÉS\n-------------------\n\n";
+    std::cout << std::fixed << std::setprecision(2);
+
+    for (const auto& r : rows) {
+        double ins_ns = r.ins_done ? r.ins_ms * 1e6 / (double)r.ins_done : 0.0;
+        double top_ns = r.top_iters ? r.top_ms * 1e6 / (double)r.top_iters : 0.0;
+        double pop_ns = r.pop_done ? r.pop_ms * 1e6 / (double)r.pop_done : 0.0;
+        double del_ns = r.del_done ? r.del_ms * 1e6 / (double)r.del_done : 0.0;
+
+        std::cout << "N = " << fmt_u(r.N) << "\n";
+        std::cout << "  Insert   : " << std::setw(12) << r.ins_ms << " ms | "
+                  << std::setw(14) << ins_ns << " ns/op ("
+                  << fmt_u(r.ins_done) << " / " << fmt_u(r.N)
+                  << (r.ins_abort ? ", ABORT" : "") << ")\n";
+        std::cout << "  Top      : " << std::setw(12) << r.top_ms << " ms | "
+                  << std::setw(14) << top_ns << " ns/op ("
+                  << fmt_u(r.top_iters) << " iters)\n";
+        std::cout << "  Pop      : " << std::setw(12) << r.pop_ms << " ms | "
+                  << std::setw(14) << pop_ns << " ns/op ("
+                  << fmt_u(r.pop_done) << (r.pop_abort ? ", ABORT" : "") << ")\n";
+        std::cout << "  DeleteKey: " << std::setw(12) << r.del_ms << " ms | "
+                  << std::setw(14) << del_ns << " ns/op ("
+                  << fmt_u(r.del_done) << (r.del_abort ? ", ABORT" : "") << ")\n\n";
+    }
+
+    // Tableau récap
+    std::cout << "TABLEAU RÉCAPITULATIF (ns/op)\n-----------------------------\n";
+    std::cout << std::left  << std::setw(12) << "N"
+              << std::right << std::setw(16) << "insert"
+              << std::setw(14) << "top"
+              << std::setw(16) << "pop"
+              << std::setw(16) << "deleteKey" << "\n";
+    std::cout << std::string(74, '-') << "\n";
+    auto nso = [](const Row& r, int kind) -> double {
+        switch (kind) {
+            case 0: return r.ins_done ? r.ins_ms * 1e6 / (double)r.ins_done : 0.0;
+            case 1: return r.top_iters ? r.top_ms * 1e6 / (double)r.top_iters : 0.0;
+            case 2: return r.pop_done ? r.pop_ms * 1e6 / (double)r.pop_done : 0.0;
+            default:return r.del_done ? r.del_ms * 1e6 / (double)r.del_done : 0.0;
+        }
+    };
+    for (const auto& r : rows) {
+        std::cout << std::left  << std::setw(12) << fmt_u(r.N)
+                  << std::right << std::setw(16) << nso(r,0)
+                  << std::setw(14) << nso(r,1)
+                  << std::setw(16) << nso(r,2)
+                  << std::setw(16) << nso(r,3) << "\n";
+    }
+
+    // Ratios
+    std::cout << "\nRATIOS ns/op entre N et N/10\n-----------------------------\n";
+    std::cout << "Attendu MinHeapVector : top ~1 (O(1)) | insert/pop ~1.1-1.3 (log N) |\n";
+    std::cout << "                        deleteKey ~10 (O(N))\n\n";
+    std::cout << std::left  << std::setw(18) << "N"
+              << std::right << std::setw(14) << "insert"
+              << std::setw(14) << "top"
+              << std::setw(14) << "pop"
+              << std::setw(14) << "deleteKey" << "\n";
+    std::cout << std::string(74, '-') << "\n";
+    for (std::size_t i = 1; i < rows.size(); ++i) {
+        const auto& a = rows[i-1];
+        const auto& b = rows[i];
+        auto ratio = [](double x, double y) -> double { return (x > 0.0 && y > 0.0) ? y / x : 0.0; };
+        std::cout << std::left  << std::setw(18) << (fmt_u(b.N) + " / " + fmt_u(a.N))
+                  << std::right << std::setw(14) << ratio(nso(a,0), nso(b,0))
+                  << std::setw(14) << ratio(nso(a,1), nso(b,1))
+                  << std::setw(14) << ratio(nso(a,2), nso(b,2))
+                  << std::setw(14) << ratio(nso(a,3), nso(b,3)) << "\n";
+    }
+
+    std::cout << "\nTerminé.\n";
+    return 0;
+}
+
+/*
+resultat terminal:
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas$ ./bench_heap_vector_scale
+================================================================
+  Benchmark MinHeapVector (std::vector) — self-contained
+  Budget/phase = 30000 ms | DEL_CAP = 10000 | TOP_ITERS = 50 000 000
+  /!\ insert/pop = O(log N), top = O(1), deleteKey = O(N)
+  /!\ N = 1e8 : ~1 Go de RAM (data + buffer)
+================================================================
+
+>>> Exécution N = 100 ... OK
+>>> Exécution N = 1 000 ... OK
+>>> Exécution N = 10 000 ... OK
+>>> Exécution N = 100 000 ... OK
+>>> Exécution N = 1 000 000 ... OK
+>>> Exécution N = 10 000 000 ... OK
+>>> Exécution N = 100 000 000 ... OK [pop ABORT]
+
+RÉSULTATS DÉTAILLÉS
+-------------------
+
+N = 100
+  Insert   :         0.00 ms |          24.90 ns/op (100 / 100)
+  Top      :        32.91 ms |           0.66 ns/op (50 000 000 iters)
+  Pop      :         0.00 ms |          93.08 ns/op (50)
+  DeleteKey:         0.01 ms |          68.75 ns/op (100)
+
+N = 1 000
+  Insert   :         0.04 ms |          37.45 ns/op (1 000 / 1 000)
+  Top      :        47.90 ms |           0.96 ns/op (50 000 000 iters)
+  Pop      :         0.04 ms |          87.72 ns/op (500)
+  DeleteKey:         0.18 ms |         181.02 ns/op (1 000)
+
+N = 10 000
+  Insert   :         0.26 ms |          25.76 ns/op (10 000 / 10 000)
+  Top      :        55.39 ms |           1.11 ns/op (50 000 000 iters)
+  Pop      :         0.55 ms |         110.56 ns/op (5 000)
+  DeleteKey:        13.39 ms |        1338.80 ns/op (10 000)
+
+N = 100 000
+  Insert   :         1.84 ms |          18.42 ns/op (100 000 / 100 000)
+  Top      :        36.46 ms |           0.73 ns/op (50 000 000 iters)
+  Pop      :         7.46 ms |         149.28 ns/op (50 000)
+  DeleteKey:        12.34 ms |        1233.65 ns/op (10 000)
+
+N = 1 000 000
+  Insert   :        24.89 ms |          24.89 ns/op (1 000 000 / 1 000 000)
+  Top      :        30.68 ms |           0.61 ns/op (50 000 000 iters)
+  Pop      :        94.95 ms |         189.90 ns/op (500 000)
+  DeleteKey:         9.22 ms |         921.76 ns/op (10 000)
+
+N = 10 000 000
+  Insert   :       204.15 ms |          20.42 ns/op (10 000 000 / 10 000 000)
+  Top      :        22.92 ms |           0.46 ns/op (50 000 000 iters)
+  Pop      :      2326.25 ms |         465.25 ns/op (5 000 000)
+  DeleteKey:        11.38 ms |        1137.78 ns/op (10 000)
+
+N = 100 000 000
+  Insert   :      2423.78 ms |          24.24 ns/op (100 000 000 / 100 000 000)
+  Top      :        31.10 ms |           0.62 ns/op (50 000 000 iters)
+  Pop      :     30000.01 ms |         700.13 ns/op (42 849 281, ABORT)
+  DeleteKey:        11.77 ms |        1176.53 ns/op (10 000)
+
+TABLEAU RÉCAPITULATIF (ns/op)
+-----------------------------
+N                     insert           top             pop       deleteKey
+--------------------------------------------------------------------------
+100                    24.90          0.66           93.08           68.75
+1 000                  37.45          0.96           87.72          181.02
+10 000                 25.76          1.11          110.56         1338.80
+100 000                18.42          0.73          149.28         1233.65
+1 000 000              24.89          0.61          189.90          921.76
+10 000 000             20.42          0.46          465.25         1137.78
+100 000 000            24.24          0.62          700.13         1176.53
+
+RATIOS ns/op entre N et N/10
+-----------------------------
+Attendu MinHeapVector : top ~1 (O(1)) | insert/pop ~1.1-1.3 (log N) |
+                        deleteKey ~10 (O(N))
+
+N                         insert           top           pop     deleteKey
+--------------------------------------------------------------------------
+1 000 / 100                 1.50          1.46          0.94          2.63
+10 000 / 1 000              0.69          1.16          1.26          7.40
+100 000 / 10 000            0.72          0.66          1.35          0.92
+1 000 000 / 100 000          1.35          0.84          1.27          0.75
+10 000 000 / 1 000 000          0.82          0.75          2.45          1.23
+100 000 000 / 10 000 000          1.19          1.36          1.50          1.03
+
+Terminé.
+*/
+</file>
+
+<file path="bench_mintas_scale.cpp">
+// bench_mintas_scale.cpp
+// Benchmark augmentatif : insert / top / pop / deleteKey sur MinHeap (vector)
+// Balaye N = 100, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8 (configurable).
+//
+// Compilation :
+//   g++ -std=c++17 -O2 -Wall -Wextra -o bench_mintas_scale bench_mintas_scale.cpp
+// Exécution :
+//   ./bench_mintas_scale              # tailles par défaut
+//   ./bench_mintas_scale 1000 100000  # tailles custom
+//
+// Conseils de lecture :
+//   - ns/op permet de comparer les tailles entre elles (complexité).
+//   - insert ≈ O(log N) → ns/op doit croître lentement avec N.
+//   - top     ≈ O(1)     → ns/op quasi constant.
+//   - pop     ≈ O(log N) → ns/op croît comme insert.
+//   - deleteKey ≈ O(N)   → ns/op croît LINÉAIREMENT avec N (recherche linéaire).
+
+#include <iostream>
+#include <vector>
+#include <random>
+#include <chrono>
+#include <iomanip>
+#include <algorithm>
+#include <string>
+#include <cstdint>
+
+// ---------- MinHeap minimal ----------
+template <typename T>
+class MinHeap {
+    std::vector<T> arr;
+    void heapify(int i) {
+        int n = (int)arr.size();
+        while (true) {
+            int l = 2*i+1, r = 2*i+2, smallest = i;
+            if (l < n && arr[l] < arr[smallest]) smallest = l;
+            if (r < n && arr[r] < arr[smallest]) smallest = r;
+            if (smallest == i) break;
+            std::swap(arr[i], arr[smallest]);
+            i = smallest;
+        }
+    }
+public:
+    void reserve(std::size_t n) { arr.reserve(n); }
+    void insert(const T& v) {
+        arr.push_back(v);
+        int i = (int)arr.size() - 1;
+        while (i != 0 && arr[i] < arr[(i-1)/2]) {
+            std::swap(arr[i], arr[(i-1)/2]);
+            i = (i-1)/2;
+        }
+    }
+    T pop() {
+        T root = arr[0];
+        arr[0] = arr.back(); arr.pop_back();
+        if (!arr.empty()) heapify(0);
+        return root;
+    }
+    const T& top() const { return arr[0]; }
+    int size() const { return (int)arr.size(); }
+    bool empty() const { return arr.empty(); }
+    bool deleteKey(const T& k) {
+        int n = (int)arr.size(), idx = -1;
+        for (int i = 0; i < n; ++i) if (arr[i] == k) { idx = i; break; }
+        if (idx == -1) return false;
+        if (idx == n-1) { arr.pop_back(); return true; }
+        arr[idx] = arr.back(); arr.pop_back();
+        int i = idx;
+        while (i != 0 && arr[i] < arr[(i-1)/2]) {
+            std::swap(arr[i], arr[(i-1)/2]); i = (i-1)/2;
+        }
+        heapify(i);
+        return true;
+    }
+};
+
+using Clock = std::chrono::high_resolution_clock;
+static double ms(Clock::time_point a, Clock::time_point b) {
+    return std::chrono::duration<double, std::milli>(b - a).count();
+}
+
+struct Row {
+    std::size_t N;
+    double ins_ms, ins_ns;
+    double top_ms, top_ns;     // par op
+    double pop_ms, pop_ns;     // par op
+    double del_ms, del_ns;     // par op (deleteKey sur min(N, 10k) éléments)
+    std::size_t top_iters;
+    std::size_t pop_count;
+    std::size_t del_count;
+};
+
+// Formate les grands nombres avec séparateurs (1'000'000 -> "1 000 000")
+static std::string fmt_u(std::uint64_t v) {
+    std::string s = std::to_string(v);
+    std::string out;
+    int c = 0;
+    for (int i = (int)s.size() - 1; i >= 0; --i) {
+        out.push_back(s[i]);
+        if (++c == 3 && i != 0) { out.push_back(' '); c = 0; }
+    }
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
+// Choisit un nombre d'itérations "top" pour rester raisonnable en temps
+// (au moins 1e4, au plus 1e7, et ~ 3e8 opérations au total).
+static std::size_t pick_top_iters(std::size_t N) {
+    // top est O(1) ; viser ~ 50M d'appels pour une mesure stable
+    const std::size_t TARGET = 50'000'000;
+    std::size_t it = TARGET;
+    if (it < 10'000) it = 10'000;
+    if (it > 20'000'000) it = 20'000'000;
+    (void)N;
+    return it;
+}
+
+static Row run_one(std::size_t N, std::mt19937_64& rng) {
+    Row r{};
+    r.N = N;
+
+    std::uniform_int_distribution<int> dist(0, 10'000'000);
+
+    // Pré-génération des données (hors mesure)
+    std::vector<int> data(N);
+    for (auto& x : data) x = dist(rng);
+
+    // ---- 1) INSERT ----
+    MinHeap<int> h;
+    h.reserve(N);
+    auto t0 = Clock::now();
+    for (int v : data) h.insert(v);
+    auto t1 = Clock::now();
+    r.ins_ms = ms(t0, t1);
+    r.ins_ns = r.ins_ms * 1e6 / (double)N;
+
+    // ---- 2) TOP ----
+    r.top_iters = pick_top_iters(N);
+    volatile long long sink = 0;
+    t0 = Clock::now();
+    for (std::size_t i = 0; i < r.top_iters; ++i) sink += h.top();
+    t1 = Clock::now();
+    r.top_ms = ms(t0, t1);
+    r.top_ns = r.top_ms * 1e6 / (double)r.top_iters;
+
+    // ---- 3) POP (moitié du heap) ----
+    r.pop_count = h.size() / 2;
+    if (r.pop_count > 0) {
+        t0 = Clock::now();
+        for (std::size_t i = 0; i < r.pop_count; ++i) sink += h.pop();
+        t1 = Clock::now();
+        r.pop_ms = ms(t0, t1);
+        r.pop_ns = r.pop_ms * 1e6 / (double)r.pop_count;
+    } else {
+        r.pop_ms = r.pop_ns = 0.0;
+    }
+
+    // ---- 4) DELETE KEY ----
+    // On construit un heap dédié de taille del_count (capped), on y supprime
+    // toutes les clés dans un ordre aléatoire. La recherche étant linéaire,
+    // le coût par op est représentatif de O(N).
+    r.del_count = std::min<std::size_t>(N, 10'000);
+    if (r.del_count > 0) {
+        MinHeap<int> hd;
+        hd.reserve(r.del_count);
+        std::vector<int> keys(r.del_count);
+        for (std::size_t i = 0; i < r.del_count; ++i) { int v = (int)i; hd.insert(v); keys[i] = v; }
+        std::shuffle(keys.begin(), keys.end(), rng);
+
+        t0 = Clock::now();
+        for (int k : keys) hd.deleteKey(k);
+        t1 = Clock::now();
+        r.del_ms = ms(t0, t1);
+        r.del_ns = r.del_ms * 1e6 / (double)r.del_count;
+    } else {
+        r.del_ms = r.del_ns = 0.0;
+    }
+
+    // Empêche l'optimisation
+    sink += h.size();
+    return r;
+}
+
+int main(int argc, char** argv) {
+    // Tailles par défaut : 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8
+    std::vector<std::size_t> sizes;
+    if (argc > 1) {
+        for (int i = 1; i < argc; ++i) sizes.push_back(std::stoull(argv[i]));
+    } else {
+        sizes = {100ULL, 1'000ULL, 10'000ULL, 100'000ULL,
+                 1'000'000ULL, 10'000'000ULL, 100'000'000ULL};
+    }
+
+    std::mt19937_64 rng(42); // graine fixe -> résultats reproductibles
+
+    std::cout << "============================================================\n";
+    std::cout << "  Benchmark MinHeap — balayage de N\n";
+    std::cout << "  (N = nombre d'éléments ; temps total en ms, par op en ns)\n";
+    std::cout << "============================================================\n\n";
+
+    std::vector<Row> rows;
+    rows.reserve(sizes.size());
+
+    for (std::size_t N : sizes) {
+        std::cout << ">>> Exécution N = " << fmt_u(N) << " ... " << std::flush;
+        Row r = run_one(N, rng);
+        rows.push_back(r);
+        std::cout << "OK\n";
+    }
+
+    std::cout << "\n";
+    std::cout << "RÉSULTATS DÉTAILLÉS\n";
+    std::cout << "-------------------\n\n";
+
+    for (const auto& r : rows) {
+        std::cout << "N = " << fmt_u(r.N) << "\n";
+        std::cout << std::fixed << std::setprecision(2);
+        std::cout << "  Insert   : " << std::setw(12) << r.ins_ms << " ms total  | "
+                  << std::setw(10) << r.ins_ns << " ns/op\n";
+        std::cout << "  Top      : " << std::setw(12) << r.top_ms << " ms total  | "
+                  << std::setw(10) << r.top_ns << " ns/op  ("
+                  << fmt_u(r.top_iters) << " iters)\n";
+        std::cout << "  Pop      : " << std::setw(12) << r.pop_ms << " ms total  | "
+                  << std::setw(10) << r.pop_ns << " ns/op  ("
+                  << fmt_u(r.pop_count) << " pops)\n";
+        std::cout << "  DeleteKey: " << std::setw(12) << r.del_ms << " ms total  | "
+                  << std::setw(10) << r.del_ns << " ns/op  ("
+                  << fmt_u(r.del_count) << " ops)\n\n";
+    }
+
+    // ---- Tableau récapitulatif ----
+    std::cout << "TABLEAU RÉCAPITULATIF (ns/op)\n";
+    std::cout << "-----------------------------\n";
+    std::cout << std::left  << std::setw(12) << "N"
+              << std::right << std::setw(14) << "insert"
+              << std::setw(14) << "top"
+              << std::setw(14) << "pop"
+              << std::setw(14) << "deleteKey" << "\n";
+    std::cout << std::string(68, '-') << "\n";
+    for (const auto& r : rows) {
+        std::cout << std::left  << std::setw(12) << fmt_u(r.N)
+                  << std::right << std::setw(14) << std::setprecision(2) << r.ins_ns
+                  << std::setw(14) << r.top_ns
+                  << std::setw(14) << r.pop_ns
+                  << std::setw(14) << r.del_ns << "\n";
+    }
+
+    // ---- Analyse de complexité (ratios entre tailles successives) ----
+    std::cout << "\nANALYSE DE COMPLEXITÉ (ratio ns/op entre N et N/10)\n";
+    std::cout << "----------------------------------------------------\n";
+    std::cout << "Attendu : top ~ 1 | insert/pop ~ log(N) (≈ 1.1-1.3) | deleteKey ~ 10 (linéaire)\n\n";
+    std::cout << std::left  << std::setw(12) << "N"
+              << std::right << std::setw(14) << "insert"
+              << std::setw(14) << "top"
+              << std::setw(14) << "pop"
+              << std::setw(14) << "deleteKey" << "\n";
+    std::cout << std::string(68, '-') << "\n";
+    for (std::size_t i = 1; i < rows.size(); ++i) {
+        const auto& a = rows[i-1];
+        const auto& b = rows[i];
+        auto ratio = [](double x, double y) -> double {
+            return (x > 0.0 && y > 0.0) ? y / x : 0.0;
+        };
+        std::cout << std::left  << std::setw(12) << (fmt_u(b.N) + " / " + fmt_u(a.N))
+                  << std::right << std::setw(14) << std::setprecision(2) << ratio(a.ins_ns, b.ins_ns)
+                  << std::setw(14) << ratio(a.top_ns, b.top_ns)
+                  << std::setw(14) << ratio(a.pop_ns, b.pop_ns)
+                  << std::setw(14) << ratio(a.del_ns, b.del_ns) << "\n";
+    }
+
+    std::cout << "\nTerminé.\n";
+    return 0;
+}
+
+/*
+resultat terminal:
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas$ ./bench_mintas_scale
+============================================================
+  Benchmark MinHeap — balayage de N
+  (N = nombre d'éléments ; temps total en ms, par op en ns)
+============================================================
+
+>>> Exécution N = 100 ... OK
+>>> Exécution N = 1 000 ... OK
+>>> Exécution N = 10 000 ... OK
+>>> Exécution N = 100 000 ... OK
+>>> Exécution N = 1 000 000 ... OK
+>>> Exécution N = 10 000 000 ... OK
+>>> Exécution N = 100 000 000 ... OK
+
+RÉSULTATS DÉTAILLÉS
+-------------------
+
+N = 100
+  Insert   :         0.00 ms total  |      16.51 ns/op
+  Top      :         9.54 ms total  |       0.48 ns/op  (20 000 000 iters)
+  Pop      :         0.00 ms total  |      59.72 ns/op  (50 pops)
+  DeleteKey:         0.01 ms total  |      50.63 ns/op  (100 ops)
+
+N = 1 000
+  Insert   :         0.03 ms total  |      27.65 ns/op
+  Top      :        12.19 ms total  |       0.61 ns/op  (20 000 000 iters)
+  Pop      :         0.04 ms total  |      72.27 ns/op  (500 pops)
+  DeleteKey:         0.39 ms total  |     390.81 ns/op  (1 000 ops)
+
+N = 10 000
+  Insert   :         0.21 ms total  |      20.85 ns/op
+  Top      :         9.77 ms total  |       0.49 ns/op  (20 000 000 iters)
+  Pop      :         0.57 ms total  |     113.18 ns/op  (5 000 pops)
+  DeleteKey:        11.14 ms total  |    1114.12 ns/op  (10 000 ops)
+
+N = 100 000
+  Insert   :         1.99 ms total  |      19.91 ns/op
+  Top      :        10.07 ms total  |       0.50 ns/op  (20 000 000 iters)
+  Pop      :         6.79 ms total  |     135.70 ns/op  (50 000 pops)
+  DeleteKey:        11.43 ms total  |    1143.21 ns/op  (10 000 ops)
+
+N = 1 000 000
+  Insert   :        23.30 ms total  |      23.30 ns/op
+  Top      :         8.10 ms total  |       0.41 ns/op  (20 000 000 iters)
+  Pop      :        95.03 ms total  |     190.06 ns/op  (500 000 pops)
+  DeleteKey:        13.05 ms total  |    1304.66 ns/op  (10 000 ops)
+
+N = 10 000 000
+  Insert   :       189.23 ms total  |      18.92 ns/op
+  Top      :         7.60 ms total  |       0.38 ns/op  (20 000 000 iters)
+  Pop      :      1986.50 ms total  |     397.30 ns/op  (5 000 000 pops)
+  DeleteKey:         9.98 ms total  |     998.26 ns/op  (10 000 ops)
+
+N = 100 000 000
+  Insert   :      2305.24 ms total  |      23.05 ns/op
+  Top      :        10.72 ms total  |       0.54 ns/op  (20 000 000 iters)
+  Pop      :     27424.15 ms total  |     548.48 ns/op  (50 000 000 pops)
+  DeleteKey:         9.09 ms total  |     909.33 ns/op  (10 000 ops)
+
+TABLEAU RÉCAPITULATIF (ns/op)
+-----------------------------
+N                   insert           top           pop     deleteKey
+--------------------------------------------------------------------
+100                  16.51          0.48         59.72         50.63
+1 000                27.65          0.61         72.27        390.81
+10 000               20.85          0.49        113.18       1114.12
+100 000              19.91          0.50        135.70       1143.21
+1 000 000            23.30          0.41        190.06       1304.66
+10 000 000           18.92          0.38        397.30        998.26
+100 000 000          23.05          0.54        548.48        909.33
+
+ANALYSE DE COMPLEXITÉ (ratio ns/op entre N et N/10)
+----------------------------------------------------
+Attendu : top ~ 1 | insert/pop ~ log(N) (≈ 1.1-1.3) | deleteKey ~ 10 (linéaire)
+
+N                   insert           top           pop     deleteKey
+--------------------------------------------------------------------
+1 000 / 100           1.67          1.28          1.21          7.72
+10 000 / 1 000          0.75          0.80          1.57          2.85
+100 000 / 10 000          0.95          1.03          1.20          1.03
+1 000 000 / 100 000          1.17          0.80          1.40          1.14
+10 000 000 / 1 000 000          0.81          0.94          2.09          0.77
+100 000 000 / 10 000 000          1.22          1.41          1.38          0.91
+
+Terminé.
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas$ 
+*/
+</file>
+
+<file path="bench_mintas.cpp">
+// bench_mintas.cpp
+// Benchmark : insert / pop / top / deleteKey sur min heap (vector)
+// Compilation : g++ -std=c++17 -O2 -Wall -Wextra -o bench_mintas bench_mintas.cpp
+
+#include <iostream>
+#include <vector>
+#include <random>
+#include <chrono>
+#include <iomanip>
+#include <algorithm>
+#include <string>
+
+// ---------- MinHeap minimal (même logique que minTas.cpp) ----------
+template <typename T>
+class MinHeap {
+    std::vector<T> arr;
+    void heapify(int i) {
+        int n = (int)arr.size();
+        int l = 2*i+1, r = 2*i+2, smallest = i;
+        if (l < n && arr[l] < arr[smallest]) smallest = l;
+        if (r < n && arr[r] < arr[smallest]) smallest = r;
+        if (smallest != i) { std::swap(arr[i], arr[smallest]); heapify(smallest); }
+    }
+public:
+    void reserve(std::size_t n) { arr.reserve(n); }
+    void insert(const T& v) {
+        arr.push_back(v);
+        int i = (int)arr.size() - 1;
+        while (i != 0 && arr[i] < arr[(i-1)/2]) {
+            std::swap(arr[i], arr[(i-1)/2]);
+            i = (i-1)/2;
+        }
+    }
+    T pop() {
+        T root = arr[0];
+        arr[0] = arr.back(); arr.pop_back();
+        if (!arr.empty()) heapify(0);
+        return root;
+    }
+    const T& top() const { return arr[0]; }
+    int size() const { return (int)arr.size(); }
+    bool empty() const { return arr.empty(); }
+    bool deleteKey(const T& k) {
+        int n = (int)arr.size(), idx = -1;
+        for (int i = 0; i < n; ++i) if (arr[i] == k) { idx = i; break; }
+        if (idx == -1) return false;
+        if (idx == n-1) { arr.pop_back(); return true; }
+        arr[idx] = arr.back(); arr.pop_back();
+        int i = idx;
+        while (i != 0 && arr[i] < arr[(i-1)/2]) {
+            std::swap(arr[i], arr[(i-1)/2]); i = (i-1)/2;
+        }
+        heapify(i);
+        return true;
+    }
+};
+
+using Clock = std::chrono::high_resolution_clock;
+static double ms(Clock::time_point a, Clock::time_point b) {
+    return std::chrono::duration<double, std::milli>(b - a).count();
+}
+
+int main(int argc, char** argv) {
+    std::size_t N = (argc > 1) ? std::stoull(argv[1]) : 1'000'000;
+
+    std::mt19937_64 rng(42);
+    std::uniform_int_distribution<int> dist(0, 10'000'000);
+
+    std::vector<int> data(N);
+    for (auto& x : data) x = dist(rng);
+
+    std::cout << "=== Benchmark MinHeap (N = " << N << ") ===\n";
+
+    // 1) INSERT
+    MinHeap<int> h; h.reserve(N);
+    auto t0 = Clock::now();
+    for (int v : data) h.insert(v);
+    auto t1 = Clock::now();
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << "Insert total : " << ms(t0,t1) << " ms ("
+              << ms(t0,t1)/N*1e6 << " ns/op)\n";
+
+    // 2) TOP (répété 10M fois pour mesurer)
+    const int TOP_ITERS = 10'000'000;
+    t0 = Clock::now();
+    volatile long long sink = 0;
+    for (int i = 0; i < TOP_ITERS; ++i) sink += h.top();
+    t1 = Clock::now();
+    std::cout << "Top x" << TOP_ITERS << " : " << ms(t0,t1) << " ms ("
+              << ms(t0,t1)/TOP_ITERS*1e6 << " ns/op)\n";
+
+    // 3) POP (vide la moitié)
+    std::size_t half = h.size() / 2;
+    t0 = Clock::now();
+    for (std::size_t i = 0; i < half; ++i) sink += h.pop();
+    t1 = Clock::now();
+    std::cout << "Pop " << half << " éléments : " << ms(t0,t1) << " ms ("
+              << ms(t0,t1)/half*1e6 << " ns/op)\n";
+
+    // 4) DELETE KEY (1000 suppressions aléatoires)
+    std::uniform_int_distribution<int> pick(0, (int)h.size()-1);
+    // On ne connait pas la position -> on tire une valeur via un tableau temporaire
+    // (simplification : on supprime des valeurs présentes)
+    MinHeap<int> h2; h2.reserve(N/4);
+    for (std::size_t i = 0; i < N/4; ++i) h2.insert(data[i]);
+
+    std::vector<int> toDelete;
+    toDelete.reserve(1000);
+    // On récupère 1000 valeurs existantes en les pioquant par pop puis re-insertion
+    // (ceci est un artefact de mesure, ne pas reproduire en prod)
+    // Alternative simple : deleteKey sur des valeurs injectées connues
+    MinHeap<int> h3; h3.reserve(1000);
+    std::vector<int> keys;
+    for (int i = 0; i < 1000; ++i) { h3.insert(i); keys.push_back(i); }
+    std::shuffle(keys.begin(), keys.end(), rng);
+
+    t0 = Clock::now();
+    for (int k : keys) h3.deleteKey(k);
+    t1 = Clock::now();
+    std::cout << "DeleteKey x1000 : " << ms(t0,t1) << " ms\n";
+
+    // 5) BUILD (vector -> heap en O(n) implicite via insert=O(n log n) déjà mesuré)
+    // On mesure aussi buildHeap explicite pour comparaison
+    // (non inclus ici par souci de concision, voir minTas.cpp pour buildHeap)
+
+    std::cout << "Sink = " << sink << " (empêche l'optimisation)\n";
+    return 0;
+}
+
+
+/*
+resultat terminal:
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas$ ./bench_mintas
+=== Benchmark MinHeap (N = 1000000) ===
+Insert total : 23.46 ms (23.46 ns/op)
+Top x10000000 : 10.29 ms (1.03 ns/op)
+Pop 500000 éléments : 114.01 ms (228.02 ns/op)
+DeleteKey x1000 : 0.16 ms
+Sink = 1252859639994 (empêche l'optimisation)
+*/
+</file>
+
+<file path="heap_list.cpp">
+// heap_list.cpp — Min Heap avec std::list
+// ATTENTION : std::list n'offre PAS d'accès aléatoire.
+// On doit utiliser std::next(lst.begin(), i) → O(i).
+// Résultat : insert/pop en O(n) au lieu de O(log n). Version pédagogique seulement.
+// Compilation : g++ -std=c++17 -O2 -Wall -Wextra -o heap_list heap_list.cpp
+
+#include <iostream>
+#include <list>
+#include <iterator>
+#include <stdexcept>
+
+template <typename T>
+class MinHeapList {
+    std::list<T> lst;
+
+    // Accès par indice : O(i) car std::list n'est pas contigu
+    typename std::list<T>::iterator at(int i) {
+        return std::next(lst.begin(), i);
+    }
+
+    void heapify(int i) {
+        int n = (int)lst.size();
+        int l = 2*i + 1, r = 2*i + 2, smallest = i;
+
+        auto itSmallest = at(smallest);
+        if (l < n) {
+            auto itL = at(l);
+            if (*itL < *itSmallest) { smallest = l; itSmallest = itL; }
+        }
+        if (r < n) {
+            auto itR = at(r);
+            if (*itR < *itSmallest) { smallest = r; itSmallest = itR; }
+        }
+        if (smallest != i) {
+            std::swap(*at(i), *at(smallest));
+            heapify(smallest);
+        }
+    }
+
+public:
+    bool empty() const { return lst.empty(); }
+    int  size()  const { return (int)lst.size(); }
+
+    void insert(const T& v) {
+        lst.push_back(v);
+        int i = (int)lst.size() - 1;
+        while (i != 0) {
+            int p = (i - 1) / 2;
+            auto itI = at(i), itP = at(p);
+            if (*itP <= *itI) break;
+            std::swap(*itI, *itP);
+            i = p;
+        }
+    }
+
+    const T& top() const {
+        if (lst.empty()) throw std::runtime_error("top() sur heap vide");
+        return lst.front();
+    }
+
+    T pop() {
+        if (lst.empty()) throw std::runtime_error("pop() sur heap vide");
+        T root = lst.front();
+        // remplacer la racine par le dernier
+        *lst.begin() = lst.back();
+        lst.pop_back();
+        if (!lst.empty()) heapify(0);
+        return root;
+    }
+
+    bool deleteKey(const T& key) {
+        int n = (int)lst.size(), idx = -1, k = 0;
+        for (auto it = lst.begin(); it != lst.end(); ++it, ++k) {
+            if (*it == key) { idx = k; break; }
+        }
+        if (idx == -1) return false;
+        if (idx == n-1) { lst.pop_back(); return true; }
+
+        *at(idx) = lst.back();
+        lst.pop_back();
+        int i = idx;
+        // remonter
+        while (i != 0) {
+            int p = (i-1)/2;
+            auto itI = at(i), itP = at(p);
+            if (*itP <= *itI) break;
+            std::swap(*itI, *itP);
+            i = p;
+        }
+        // descendre
+        heapify(i);
+        return true;
+    }
+
+    void print(std::ostream& os = std::cout) const {
+        os << "MinHeapList: [ ";
+        for (const auto& v : lst) os << v << ' ';
+        os << "]\n";
+    }
+};
+
+int main() {
+    MinHeapList<int> h;
+    for (int v : {88, 1, 10, 2, 99, 100, 102, 7}) h.insert(v);
+    h.print();
+    std::cout << "top = " << h.top() << "\n";
+    std::cout << "pop = " << h.pop() << "\n";
+    h.print();
+    h.deleteKey(99);
+    h.print();
+    return 0;
+}
+
+/*
+resultat terminal:
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas$ ./heap_list
+MinHeapList: [ 1 2 10 7 99 100 102 88 ]
+top = 1
+pop = 1
+MinHeapList: [ 2 7 10 88 99 100 102 ]
+MinHeapList: [ 2 7 10 88 102 100 ]
+*/
+</file>
+
+<file path="heap_map.cpp">
+// heap_map.cpp — Min Heap avec std::map<int, T> (clé = index dans le tableau virtuel)
+// Justification : std::map fournit un accès par clé en O(log n).
+// On stocke le heap comme un tableau indexé 0..n-1 dans une map.
+// Résultat : insert/pop en O(log² n) (O(log n) par accès × O(log n) niveaux).
+// Moins rapide que vector mais conserve une complexité logarithmique.
+// Compilation : g++ -std=c++17 -O2 -Wall -Wextra -o heap_map heap_map.cpp
+
+#include <iostream>
+#include <map>
+#include <stdexcept>
+
+template <typename T>
+class MinHeapMap {
+    std::map<int, T> tree;   // index -> valeur
+
+    T&       ref(int i)       { return tree.at(i); }
+    const T& ref(int i) const { return tree.at(i); }
+
+    void heapify(int i) {
+        int n = (int)tree.size();
+        int l = 2*i+1, r = 2*i+2, smallest = i;
+        if (l < n && ref(l) < ref(smallest)) smallest = l;
+        if (r < n && ref(r) < ref(smallest)) smallest = r;
+        if (smallest != i) {
+            std::swap(ref(i), ref(smallest));
+            heapify(smallest);
+        }
+    }
+
+public:
+    bool empty() const { return tree.empty(); }
+    int  size()  const { return (int)tree.size(); }
+
+    void insert(const T& v) {
+        int idx = (int)tree.size();
+        tree[idx] = v;
+        int i = idx;
+        while (i != 0) {
+            int p = (i-1)/2;
+            if (ref(p) <= ref(i)) break;
+            std::swap(ref(i), ref(p));
+            i = p;
+        }
+    }
+
+    const T& top() const {
+        if (tree.empty()) throw std::runtime_error("top() sur heap vide");
+        return tree.at(0);
+    }
+
+    T pop() {
+        if (tree.empty()) throw std::runtime_error("pop() sur heap vide");
+        T root = tree.at(0);
+        int last = (int)tree.size() - 1;
+        if (last == 0) { tree.clear(); return root; }
+        tree[0] = tree.at(last);
+        tree.erase(last);
+        heapify(0);
+        return root;
+    }
+
+    bool deleteKey(const T& key) {
+        int idx = -1;
+        for (const auto& kv : tree) {
+            if (kv.second == key) { idx = kv.first; break; }
+        }
+        if (idx == -1) return false;
+        int last = (int)tree.size() - 1;
+        if (idx == last) { tree.erase(last); return true; }
+
+        tree[idx] = tree.at(last);
+        tree.erase(last);
+        int i = idx;
+        while (i != 0) {
+            int p = (i-1)/2;
+            if (ref(p) <= ref(i)) break;
+            std::swap(ref(i), ref(p));
+            i = p;
+        }
+        heapify(i);
+        return true;
+    }
+
+    void print(std::ostream& os = std::cout) const {
+        os << "MinHeapMap: [ ";
+        for (const auto& kv : tree) os << kv.second << ' ';
+        os << "]\n";
+    }
+};
+
+int main() {
+    MinHeapMap<int> h;
+    for (int v : {88, 1, 10, 2, 99, 100, 102, 7}) h.insert(v);
+    h.print();
+    std::cout << "top = " << h.top() << "\n";
+    std::cout << "pop = " << h.pop() << "\n";
+    h.print();
+    h.deleteKey(99);
+    h.print();
+    return 0;
+
+}
+
+
+/*
+resultat terminal:
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas$ ./heap_map
+MinHeapMap: [ 1 2 10 7 99 100 102 88 ]
+top = 1
+pop = 1
+MinHeapMap: [ 2 7 10 88 99 100 102 ]
+MinHeapMap: [ 2 7 10 88 102 100 ]
+*/
+</file>
+
+<file path="heap_raw.cpp">
+// heap_raw.cpp — Min Heap sans STL : tableau dynamique géré à la main (new/delete)
+// Compilation : g++ -std=c++17 -O2 -Wall -Wextra -o heap_raw heap_raw.cpp
+
+#include <iostream>
+#include <stdexcept>
+
+template <typename T>
+class MinHeapRaw {
+    T*   buf;        // tableau dynamique brut
+    int  sz;         // taille actuelle
+    int  cap;        // capacité allouée
+
+    void grow() {
+        int newCap = (cap == 0) ? 8 : cap * 2;
+        T* newBuf = new T[newCap];
+        for (int i = 0; i < sz; ++i) newBuf[i] = buf[i];
+        delete[] buf;
+        buf = newBuf;
+        cap = newCap;
+    }
+
+    void heapify(int i) {
+        int l = 2*i+1, r = 2*i+2, smallest = i;
+        if (l < sz && buf[l] < buf[smallest]) smallest = l;
+        if (r < sz && buf[r] < buf[smallest]) smallest = r;
+        if (smallest != i) {
+            T tmp = buf[i]; buf[i] = buf[smallest]; buf[smallest] = tmp;
+            heapify(smallest);
+        }
+    }
+
+public:
+    MinHeapRaw() : buf(nullptr), sz(0), cap(0) {}
+
+    // Interdiction de la copie par simplicité (règle des 3/5 non traitée ici)
+    MinHeapRaw(const MinHeapRaw&) = delete;
+    MinHeapRaw& operator=(const MinHeapRaw&) = delete;
+
+    ~MinHeapRaw() { delete[] buf; }
+
+    bool empty() const { return sz == 0; }
+    int  size()  const { return sz; }
+
+    void insert(const T& v) {
+        if (sz == cap) grow();
+        buf[sz++] = v;
+        int i = sz - 1;
+        while (i != 0 && buf[i] < buf[(i-1)/2]) {
+            T tmp = buf[i]; buf[i] = buf[(i-1)/2]; buf[(i-1)/2] = tmp;
+            i = (i-1)/2;
+        }
+    }
+
+    const T& top() const {
+        if (sz == 0) throw std::runtime_error("top() sur heap vide");
+        return buf[0];
+    }
+
+    T pop() {
+        if (sz == 0) throw std::runtime_error("pop() sur heap vide");
+        T root = buf[0];
+        buf[0] = buf[--sz];
+        if (sz > 0) heapify(0);
+        return root;
+    }
+
+    bool deleteKey(const T& key) {
+        int idx = -1;
+        for (int i = 0; i < sz; ++i) if (buf[i] == key) { idx = i; break; }
+        if (idx == -1) return false;
+        if (idx == sz-1) { --sz; return true; }
+
+        buf[idx] = buf[--sz];
+        int i = idx;
+        while (i != 0 && buf[i] < buf[(i-1)/2]) {
+            T tmp = buf[i]; buf[i] = buf[(i-1)/2]; buf[(i-1)/2] = tmp;
+            i = (i-1)/2;
+        }
+        heapify(i);
+        return true;
+    }
+
+    void print(std::ostream& os = std::cout) const {
+        os << "MinHeapRaw: [ ";
+        for (int i = 0; i < sz; ++i) os << buf[i] << ' ';
+        os << "]\n";
+    }
+};
+
+int main() {
+    MinHeapRaw<int> h;
+    for (int v : {88, 1, 10, 2, 99, 100, 102, 7}) h.insert(v);
+    h.print();
+    std::cout << "top = " << h.top() << "\n";
+    std::cout << "pop = " << h.pop() << "\n";
+    h.print();
+    h.deleteKey(99);
+    h.print();
+    return 0;
+}
+</file>
+
+<file path="heap_vector.cpp">
+// heap_vector.cpp — Min Heap avec std::vector (implémentation de référence)
+// Compilation : g++ -std=c++17 -O2 -Wall -Wextra -o heap_vector heap_vector.cpp
+
+#include <iostream>
+#include <vector>
+#include <stdexcept>
+
+template <typename T>
+class MinHeapVector {
+    std::vector<T> arr;
+
+    void heapify(int i) {
+        int n = (int)arr.size();
+        int l = 2*i + 1, r = 2*i + 2, smallest = i;
+        if (l < n && arr[l] < arr[smallest]) smallest = l;
+        if (r < n && arr[r] < arr[smallest]) smallest = r;
+        if (smallest != i) {
+            std::swap(arr[i], arr[smallest]);
+            heapify(smallest);
+        }
+    }
+
+public:
+    void reserve(std::size_t n) { arr.reserve(n); }
+    bool empty() const { return arr.empty(); }
+    int  size()  const { return (int)arr.size(); }
+
+    void insert(const T& v) {
+        arr.push_back(v);
+        int i = (int)arr.size() - 1;
+        while (i != 0 && arr[i] < arr[(i-1)/2]) {
+            std::swap(arr[i], arr[(i-1)/2]);
+            i = (i-1)/2;
+        }
+    }
+
+    const T& top() const {
+        if (arr.empty()) throw std::runtime_error("top() sur heap vide");
+        return arr[0];
+    }
+
+    T pop() {
+        if (arr.empty()) throw std::runtime_error("pop() sur heap vide");
+        T root = arr[0];
+        arr[0] = arr.back();
+        arr.pop_back();
+        if (!arr.empty()) heapify(0);
+        return root;
+    }
+
+    bool deleteKey(const T& key) {
+        int n = (int)arr.size(), idx = -1;
+        for (int i = 0; i < n; ++i) if (arr[i] == key) { idx = i; break; }
+        if (idx == -1) return false;
+        if (idx == n-1) { arr.pop_back(); return true; }
+        arr[idx] = arr.back(); arr.pop_back();
+        int i = idx;
+        while (i != 0 && arr[i] < arr[(i-1)/2]) {
+            std::swap(arr[i], arr[(i-1)/2]); i = (i-1)/2;
+        }
+        heapify(i);
+        return true;
+    }
+
+    void print(std::ostream& os = std::cout) const {
+        os << "MinHeapVector: [ ";
+        for (const auto& v : arr) os << v << ' ';
+        os << "]\n";
+    }
+};
+
+int main() {
+    MinHeapVector<int> h;
+    for (int v : {88, 1, 10, 2, 99, 100, 102, 7}) h.insert(v);
+    h.print();
+    std::cout << "top = " << h.top() << "\n";
+    std::cout << "pop = " << h.pop() << "\n";
+    h.print();
+    h.deleteKey(99);
+    h.print();
+    return 0;
+}
+
+
+/*
+Resultat terminal:
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas$ ./heap_vector
+MinHeapVector: [ 1 2 10 7 99 100 102 88 ]
+top = 1
+pop = 1
+MinHeapVector: [ 2 7 10 88 99 100 102 ]
+MinHeapVector: [ 2 7 10 88 102 100 ]
+*/
+</file>
+
+<file path="minTas.cpp">
+// minTas.cpp
+// Min Heap simple et lisible (version étudiant 2e année ingénierie)
+// Compilation : g++ -std=c++17 -O2 -Wall -Wextra -o minTas minTas.cpp
+
+#include <iostream>
+#include <vector>
+#include <stdexcept>
+
+template <typename T>
+class MinHeap {
+private:
+    std::vector<T> arr;   // stockage interne
+
+    // Restaure la propriété du min heap à partir de l'indice i (descente)
+    void heapify(int i) {
+        int n = static_cast<int>(arr.size());
+        int smallest = i;
+        int left  = 2 * i + 1;
+        int right = 2 * i + 2;
+
+        if (left < n && arr[left] < arr[smallest])  smallest = left;
+        if (right < n && arr[right] < arr[smallest]) smallest = right;
+
+        if (smallest != i) {
+            std::swap(arr[i], arr[smallest]);
+            heapify(smallest);
+        }
+    }
+
+public:
+    MinHeap() = default;
+
+    explicit MinHeap(const std::vector<T>& input) {
+        arr = input;
+        // Construit le heap en O(n)
+        for (int i = static_cast<int>(arr.size()) / 2 - 1; i >= 0; --i) {
+            heapify(i);
+        }
+    }
+
+    bool empty() const { return arr.empty(); }
+    int  size()  const { return static_cast<int>(arr.size()); }
+
+    // Insertion : on ajoute à la fin puis on remonte
+    void insert(const T& value) {
+        arr.push_back(value);
+        int i = static_cast<int>(arr.size()) - 1;
+        while (i != 0 && arr[i] < arr[(i - 1) / 2]) {
+            std::swap(arr[i], arr[(i - 1) / 2]);
+            i = (i - 1) / 2;
+        }
+    }
+
+    // Retourne le minimum sans le retirer
+    const T& top() const {
+        if (arr.empty()) throw std::runtime_error("MinHeap::top() : heap vide");
+        return arr[0];
+    }
+
+    // Retire et retourne le minimum
+    T pop() {
+        if (arr.empty()) throw std::runtime_error("MinHeap::pop() : heap vide");
+        T root = arr[0];
+        arr[0] = arr.back();
+        arr.pop_back();
+        if (!arr.empty()) heapify(0);
+        return root;
+    }
+
+    // Supprime une clé arbitraire (première occurrence)
+    bool deleteKey(const T& key) {
+        int n = static_cast<int>(arr.size());
+        int index = -1;
+        for (int i = 0; i < n; ++i) {
+            if (arr[i] == key) { index = i; break; }
+        }
+        if (index == -1) return false;
+
+        if (index == n - 1) { arr.pop_back(); return true; }
+
+        arr[index] = arr.back();
+        arr.pop_back();
+
+        // Selon la valeur, il faut remonter ou descendre
+        int i = index;
+        // Remonter si nécessaire
+        while (i != 0 && arr[i] < arr[(i - 1) / 2]) {
+            std::swap(arr[i], arr[(i - 1) / 2]);
+            i = (i - 1) / 2;
+        }
+        // Sinon descendre
+        heapify(i);
+        return true;
+    }
+
+    void print(std::ostream& os = std::cout) const {
+        os << "Min Heap: [ ";
+        for (const auto& v : arr) os << v << ' ';
+        os << "]\n";
+    }
+
+    const std::vector<T>& data() const { return arr; }
+};
+
+// -------- Démonstration --------
+int main() {
+    MinHeap<int> h;
+    std::cout << "Insertion successive de 88, 1, 10 :\n";
+    for (int v : {88, 1, 10}) { h.insert(v); h.print(); }
+
+    std::cout << "\nInsertion successive de 2, 99, 100, 102, 7 :\n";
+    for (int v : {2, 99, 100, 102, 7}) { h.insert(v); h.print(); }
+
+    std::cout << "\nTop = " << h.top() << "\n";
+    std::cout << "Pop = " << h.pop() << "\n";
+    h.print();
+
+    h.deleteKey(99);
+    std::cout << "Après deleteKey(99) :\n";
+    h.print();
+
+    return 0;
+}
+/*
+Resultat Terminal:
+alan@alan-HP-EliteBook-850-G8-Notebook-PC:~/Documents/ILISI2/Virtualisation/C++/TAS/MinTas$ ./minTas
+Insertion successive de 88, 1, 10 :
+Min Heap: [ 88 ]
+Min Heap: [ 1 88 ]
+Min Heap: [ 1 88 10 ]
+
+Insertion successive de 2, 99, 100, 102, 7 :
+Min Heap: [ 1 2 10 88 ]
+Min Heap: [ 1 2 10 88 99 ]
+Min Heap: [ 1 2 10 88 99 100 ]
+Min Heap: [ 1 2 10 88 99 100 102 ]
+Min Heap: [ 1 2 10 7 99 100 102 88 ]
+
+Top = 1
+Pop = 1
+Min Heap: [ 2 7 10 88 99 100 102 ]
+Après deleteKey(99) :
+Min Heap: [ 2 7 10 88 102 100 ]
+*/
+</file>
+
+</files>
